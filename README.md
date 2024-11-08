@@ -193,7 +193,7 @@ run).
 
 An example usage code looks as follows:
 
-```
+```rust
 use rand_core::OsRng;
 use fn_dsa::{
     sign_key_size, vrfy_key_size, signature_size, FN_DSA_LOGN_512,
