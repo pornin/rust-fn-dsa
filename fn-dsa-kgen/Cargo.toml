@@ -1,0 +1,22 @@
+[package]
+name = "fn-dsa-kgen"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fn-dsa-comm = { version = "0.1", path = "../fn-dsa-comm" }
+zeroize.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+hex.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true

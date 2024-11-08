@@ -1,0 +1,31 @@
+[workspace]
+members = [
+    "fn-dsa",
+    "fn-dsa-comm",
+    "fn-dsa-kgen",
+    "fn-dsa-sign",
+    "fn-dsa-vrfy",
+]
+resolver = "2"
+
+[workspace.package]
+authors = ["Thomas Pornin <thomas.pornin@nccgroup.com>"]
+categories = ["cryptography", "no-std"]
+description = "FN-DSA signature scheme"
+edition = "2021"
+keywords = ["cryptography", "fn-dsa", "falcon"]
+license = "Unlicense"
+readme = "README.md"
+repository = "https://github.com/pornin/rust-fn-dsa"
+rust-version = "1.82"
+
+[workspace.dependencies]
+# main dependencies
+rand_core = "0.6"
+zeroize = { version = "1.8", features = [ "zeroize_derive" ] }
+# dev-only dependencies
+sha2 = "0.10"
+hex = "0.4.3"
+num-bigint = "0.4.3"
+num-traits = "0.2"
+#libm = "0.2.11"
