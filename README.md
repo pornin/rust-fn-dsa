@@ -210,14 +210,14 @@ let mut vrfy_key = [0u8; vrfy_key_size(FN_DSA_LOGN_512)];
 kg.keygen(FN_DSA_LOGN_512, &mut OsRng, &mut sign_key, &mut vrfy_key);
 
 // Sign a message with the signing key.
-let mut sk = SigningKeyStandard::decode(encoded_signing_key)?;
+let mut sk = SigningKeyStandard::decode(&sign_key).or_else(...);
 let mut sig = vec![0u8; signature_size(sk.get_logn())];
 sk.sign(&mut OsRng, &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
 
 // Verify a signature with the verifying key.
-match VerifyingKeyStandard::decode(encoded_verifying_key) {
+match VerifyingKeyStandard::decode(&vrfy_key) {
     Some(vk) => {
-        if vk.verify(sig, &DOMAIN_NONE, &HASH_ID_RAW, b"message") {
+        if vk.verify(&sig, &DOMAIN_NONE, &HASH_ID_RAW, b"message") {
             // signature is valid
         } else {
             // signature is not valid
