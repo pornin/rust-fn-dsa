@@ -44,7 +44,7 @@
 
 // Return 0xFFFFFFFF if the top bit of x is 1, 0x00000000 otherwise.
 #[inline(always)]
-pub(crate) fn tbmask(x: u32) -> u32 {
+pub(crate) const fn tbmask(x: u32) -> u32 {
     ((x as i32) >> 31) as u32
 }
 
