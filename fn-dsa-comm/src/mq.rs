@@ -130,15 +130,6 @@ fn mq_sub(x: u32, y: u32) -> u32 {
     Q - b
 }
 
-// Negation modulo q (internal representation).
-#[allow(dead_code)]
-#[inline(always)]
-fn mq_neg(x: u32) -> u32 {
-    let a = Q - x;
-    let b = a.wrapping_add(Q & (a >> 16));
-    Q - b
-}
-
 // Halving modulo q (internal representation).
 #[inline(always)]
 fn mq_half(x: u32) -> u32 {

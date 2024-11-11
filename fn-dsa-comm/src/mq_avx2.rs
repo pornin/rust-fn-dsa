@@ -161,26 +161,6 @@ unsafe fn mq_sub_x16(x: __m256i, y: __m256i) -> __m256i {
     _mm256_sub_epi16(qq, b)
 }
 
-// Negation modulo q (internal representation).
-#[allow(dead_code)]
-#[inline]
-unsafe fn mq_neg(x: u32) -> u32 {
-    let a = Q - x;
-    let b = a.wrapping_add(Q & (a >> 16));
-    Q - b
-}
-
-#[target_feature(enable = "avx2")]
-#[allow(dead_code)]
-#[inline]
-unsafe fn mq_neg_x16(x: __m256i) -> __m256i {
-    let qq = _mm256_set1_epi16(Q as i16);
-    let a = _mm256_sub_epi16(qq, x);
-    let b = _mm256_add_epi16(a,
-        _mm256_and_si256(qq, _mm256_srai_epi16(a, 15)));
-    _mm256_sub_epi16(qq, b)
-}
-
 // Halving modulo q (internal representation).
 #[target_feature(enable = "avx2")]
 #[inline]
