@@ -370,12 +370,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn verity_kat_512() {
+    fn verify_kat_512() {
         verify_kat_inner(&KAT_ORIG_512);
     }
 
     #[test]
-    fn verity_kat_1024() {
+    fn verify_kat_1024() {
         verify_kat_inner(&KAT_ORIG_1024);
     }
 
