@@ -95,7 +95,7 @@ pub fn modq_encode(h: &[u16], d: &mut [u8]) -> usize {
     j
 }
 
-/// Encode integers modulo 12289 from bytes, with 14 bits per value.
+/// Decode integers modulo 12289 from bytes, with 14 bits per value.
 ///
 /// Decode some bytes into integers modulo q = 12289. Exactly as many
 /// bytes as necessary are read from the source `d` to fill all values in
@@ -288,7 +288,6 @@ pub fn comp_decode(d: &[u8], v: &mut [i16]) -> bool {
         if (acc & ((1 << acc_len) - 1)) != 0 {
             return false;
         }
-        i += 1;
     }
     for k in i..d.len() {
         if d[k] != 0 {
