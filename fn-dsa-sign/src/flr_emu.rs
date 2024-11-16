@@ -70,7 +70,7 @@ const fn lzcnt_nz(x: u64) -> u32 {
 // 2^63 <= m*2^n < 2^64. If m = 0 then this returns (0, e-63).
 const fn norm64(m: u64, e: i32) -> (u64, i32) {
     let c = lzcnt_nz(m | 1);
-    (m << c, e - (c as i32))
+    (ulsh(m, c), e - (c as i32))
 }
 
 // Shifts by a 64-bit value, with a possibly secret shift count. We
