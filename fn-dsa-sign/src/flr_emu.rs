@@ -660,7 +660,7 @@ impl FLR {
         // Extract exponent and mantissa. By assumption, the operand is
         // non-negative, hence we can ignore that the sign bit (we must
         // still mask it out because sqrt() can be applied to -0.0).
-        // We want the "true" exponent corresponding in a mantissa in
+        // We want the "true" exponent corresponding to a mantissa in
         // the [1,2[ range.
         let mut xu = (self.0 & M52) | (1u64 << 52);
         let ex = ((self.0 >> 52) as u32) & 0x7FF;

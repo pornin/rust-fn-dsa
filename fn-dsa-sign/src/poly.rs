@@ -312,7 +312,7 @@ pub(crate) fn poly_LDL_fft(logn: u32,
 
         /* unused
            Reference C code was using the following, which makes some
-           unneeded operations in g00_im and g11_im are zero.
+           unneeded operations since g00_im and g11_im are zero.
 
         let (g00_re, g00_im) = (g00[i], g00[i + hn]);
         let (g01_re, g01_im) = (g01[i], g01[i + hn]);
@@ -431,8 +431,8 @@ pub(crate) fn poly_merge_fft(logn: u32,
 
 // Table of constants for FFT. For k = 1 to 1023, define j = rev10(k), with
 // rev10() being the bit-reversal function over 10 bits. Then:
-//   GM[2*k + 0] = cos(j*pi/1024)
-//   GM[2*k + 1] = sin(j*pi/1024)
+//   GM[2*k + 0] = cos(k*pi/1024)
+//   GM[2*k + 1] = sin(k*pi/1024)
 // Here, all values are computed from integer approximations which were
 // obtained from Sage, which employs sufficient precision to get an exact
 // rounding. Specifically, we round x = cos(j*pi/1024) by looking for the
