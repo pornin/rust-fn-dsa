@@ -224,7 +224,25 @@ impl<T: PRNG> Sampler<T> {
         // (i.e. if r = 0 then we may get 2^64 and we prefer 2^64-1 in
         // that case). The bias is neligible since expm_p63() only
         // computes with 51 bits of precision or so.
-        let z = (r.expm_p63(ccs) << 1).wrapping_sub(1) >> s;
+        //
+        // Since the shift is over a 64-bit value and the shift count is
+        // nominally secret, we should use a special shift process because
+        // some 32-bit architecture employ a non-constant-time routine
+        // in that case.
+        let z = (r.expm_p63(ccs) << 1).wrapping_sub(1);
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm64ec",
+            target_arch = "riscv64"))]
+        let z = z >> s;
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm64ec",
+            target_arch = "riscv64")))]
+        let z = (z ^ ((z ^ (z >> 32)) & ((s >> 5) as u64).wrapping_neg()))
+            >> (s & 31);
 
         // Sample a bit with probability ccs*exp(-x). We lazily compare 
         // the value z with a uniform 64-bit integer, consuming only as
