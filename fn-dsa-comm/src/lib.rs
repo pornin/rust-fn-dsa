@@ -14,7 +14,8 @@ pub mod mq;
 pub mod shake;
 
 /// Specialized versions of `mq` which use AVX2 opcodes (on x86 CPUs).
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 pub mod mq_avx2;
 
 // Re-export RNG traits to get a smooth dependency management.
@@ -229,7 +230,8 @@ pub trait PRNG: Copy + Clone {
 ///
 /// This is a specialized subcase of the is_x86_feature_detected macro,
 /// except that this function is compatible with `no_std` builds.
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 pub fn has_avx2() -> bool {
     #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::{__cpuid, __cpuid_count, _xgetbv};

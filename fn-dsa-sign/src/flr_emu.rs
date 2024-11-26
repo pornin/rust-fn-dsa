@@ -1,6 +1,10 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+// Depending on the target architecture, some explicit intrisics could be
+// used instead of the functions defined here.
+#![allow(dead_code)]
+
 // ========================================================================
 // Floating-point operations: emulated
 // ========================================================================
@@ -326,6 +330,7 @@ impl FLR {
     // This is a helper function used in the implementation of the FFT
     // and included in the FLR API because different implementations might
     // do it very differently.
+    #[allow(dead_code)]
     pub(crate) fn slice_div2e(f: &mut [FLR], e: u32) {
         // In the emulated implementation, division by 2^e is done by
         // subtracting e from the exponent; we must just take care not to
@@ -751,19 +756,19 @@ impl FLR {
         y
     }
 
-    const EXPM_COEFFS: [u64; 13] = [
-                0x00000004741183A3,
-                0x00000036548CFC06,
-                0x0000024FDCBF140A,
-                0x0000171D939DE045,
-                0x0000D00CF58F6F84,
-                0x000680681CF796E3,
-                0x002D82D8305B0FEA,
-                0x011111110E066FD0,
-                0x0555555555070F00,
-                0x155555555581FF00,
-                0x400000000002B400,
-                0x7FFFFFFFFFFF4800,
-                0x8000000000000000,
+    pub(crate) const EXPM_COEFFS: [u64; 13] = [
+        0x00000004741183A3,
+        0x00000036548CFC06,
+        0x0000024FDCBF140A,
+        0x0000171D939DE045,
+        0x0000D00CF58F6F84,
+        0x000680681CF796E3,
+        0x002D82D8305B0FEA,
+        0x011111110E066FD0,
+        0x0555555555070F00,
+        0x155555555581FF00,
+        0x400000000002B400,
+        0x7FFFFFFFFFFF4800,
+        0x8000000000000000,
     ];
 }

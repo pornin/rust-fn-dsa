@@ -556,7 +556,8 @@ pub(crate) fn zint_bezout(u: &mut [u32], v: &mut [u32],
 // assumes that x != 0. There are dedicated opcodes for this operation
 // on x86 (bsr and lzcnt) and aarch64 (clz); they are constant-time for
 // all CPUs we care about. On other architectures, we use a slower but
-// safe function.
+// safe function. On RISC-V, there is an appropriate opcode in the Zbb
+// extension, which is not part of the default riscv64 architecture.
 //
 // Note: on x86 without lzcnt, x.leading_zeros() uses bsr but has a
 // conditional for the case of a zero input, that bsr does not handle
@@ -564,15 +565,19 @@ pub(crate) fn zint_bezout(u: &mut [u32], v: &mut [u32],
 // contradict constant-time discipline.
 
 #[cfg(any(
-    target_arch = "x86", target_arch = "x86_64",
-    target_arch = "aarch64", target_arch = "arm64ec"))]
+    target_arch = "x86",
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    target_arch = "arm64ec"))]
 const fn lzcnt(x: u32) -> u32 {
     x.leading_zeros()
 }
 
 #[cfg(not(any(
-    target_arch = "x86", target_arch = "x86_64",
-    target_arch = "aarch64", target_arch = "arm64ec")))]
+    target_arch = "x86",
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    target_arch = "arm64ec")))]
 const fn lzcnt(x: u32) -> u32 {
     let m = tbmask((x >> 16).wrapping_sub(1));
     let s = m & 16;
@@ -631,8 +636,10 @@ pub(crate) const fn bitlength(x: u32) -> u32 {
 }
 
 #[cfg(not(any(
-    target_arch = "x86", target_arch = "x86_64",
-    target_arch = "aarch64", target_arch = "arm64ec")))]
+    target_arch = "x86",
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    target_arch = "arm64ec")))]
 pub(crate) const fn bitlength(x: u32) -> u32 {
     32 - lzcnt(x)
 }

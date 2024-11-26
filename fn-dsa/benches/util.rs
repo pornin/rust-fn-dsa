@@ -77,12 +77,26 @@ impl RngCore for FakeRNG {
 
 pub fn banner_arch() {
     #[cfg(any(target_arch = "x86_64"))]
-    println!("Arch: x86_64, AVX2:{}",
-        if fn_dsa_comm::has_avx2() { "yes" } else { "no" });
+    {
+        print!("Arch: x86_64 (64-bit)");
+        #[cfg(feature = "no_avx2")]
+        print!(", AVX2:code=no");
+        #[cfg(not(feature = "no_avx2"))]
+        print!(", AVX2:code=yes,cpu={}",
+            if fn_dsa_comm::has_avx2() { "yes" } else { "no" });
+        println!();
+    }
 
     #[cfg(any(target_arch = "x86"))]
-    println!("Arch: x86 (32-bit), AVX2:{}",
-        if fn_dsa_comm::has_avx2() { "yes" } else { "no" });
+    {
+        print!("Arch: x86 (32-bit)");
+        #[cfg(feature = "no_avx2")]
+        print!(", AVX2:code=no");
+        #[cfg(not(feature = "no_avx2"))]
+        print!(", AVX2:code=yes,cpu={}",
+            if fn_dsa_comm::has_avx2() { "yes" } else { "no" });
+        println!();
+    }
 
     #[cfg(any(target_arch = "aarch64"))]
     println!("Arch: aarch64");
@@ -90,10 +104,14 @@ pub fn banner_arch() {
     #[cfg(any(target_arch = "arm64ec"))]
     println!("Arch: arm64ec");
 
+    #[cfg(any(target_arch = "riscv64"))]
+    println!("Arch: riscv64");
+
     #[cfg(not(any(
         target_arch = "x86_64",
         target_arch = "x86",
         target_arch = "aarch64",
-        target_arch = "arm64ec")))]
+        target_arch = "arm64ec",
+        target_arch = "riscv64")))]
     println!("Arch: unknown");
 }

@@ -52,6 +52,65 @@ a canonical encoding which is enforced by the code, i.e. it should not
 be feasible to modify the encoding of an existing public key or a
 signature without changing its mathematical value.
 
+## Optimizations, Platforms and Features
+
+The base implementation uses only integer computations, which are
+presumed safe, and constant-time to the extent that such things are
+possible (this should be considered a "best-effort" implementation,
+since recent LLVM versions have become pretty good at inferring that
+values are really Booleans in digsuise, and of course the same could
+apply to any JIT compilation layer, either hidden in-silicon, or as part
+of a virtual machine implementation, e.g. is using WASM). On some
+architectures, some optimizations are applied:
+
+  - **x86 and x86_64:** if SSE2 support is detected at compile-time,
+    then SSE2 opcodes are used for floating-point computations in
+    signature generation. Note that SSE2 is part of the ABI for `x86_64`,
+    but is also enabled by default for `x86`.
+
+  - **aarch64:** on ARMv8 (64-bit), if NEON support is detected at
+    compile-time, then NEON opcodes are used, for a result similar to
+    what is done on `x86` with SSE2. NEON is part of the ABI for
+    `aarch64`.
+
+  - **riscv64:** on 64-bit RISC-V systems, we assume that the target
+    implements the D extension (double-precision floating-point). Note
+    that the compiler, by default, assumes RV64GC, i.e. that I, M, A, F,
+    D and C are supported.
+
+On top of that, on `x86` and `x86_64`, a second version of the code is
+compiled and automatically used if a _runtime_ test shows that the
+current CPU supports AVX2 (and it was not disabled by the operating
+system). AVX2 optimizations improve performance of keygen, signing, and
+verifying (the performance boost over SSE2 for signing is rather slight,
+but for keygen and verifying it almost halves the cost).
+
+The following features, which are not enabled by default, can be used to
+modify the code generation:
+
+  - `no_avx2`: do not include the AVX2-optimized code. Using this option
+    also removes the runtime test for CPU support of AVX2 opcodes; it
+    can be used if compiled code footprint is an issue. SSE2 opcodes will
+    still be used.
+
+  - `div_emu`: on `riscv64`, do not use the hardware implementation for
+    floating-point divisions. This feature was included because some
+    RISC-V cores, in particular the SiFive U74, have constant-time
+    additions and multiplications, but division cost varies depending on
+    the input operands.
+
+  - `sqrt_emu`: this is similar to `div_emu` but for the square root
+    operation. On the SiFive U74, enabling both `div_emu` and `sqrt_emu`
+    increases the cost of signature generation by about 25%.
+
+  - `small_context`: reduce the in-memory size of the signature generator
+    context (`SigningKey` instance); for the largest degree (n = 1024),
+    using `small_context` shrinks the context size from about 114 kB to
+    about 82 kB, but it also increases signature cost by about 25%.
+
+Of these options, only `no_avx2` has any impact on keygen and verifying.
+
+
 ## Performance
 
 This implementation achieves performance similar to that obtained with C
@@ -85,6 +144,43 @@ additional signatures relatively to the same key. We may note that
 this is about as fast as RSA-2048 for verification, but about 2.5x
 faster for signature generation, and many times faster for key pair
 generation.
+
+On an ARM Cortex-A76 CPU (Broadcom BCM2712C1), performance is as
+follows:
+
+```
+    degree    keygen      sign     +sign    verify  +verify
+   ---------------------------------------------------------
+      512    21500000   1070000    747000   145000   104000
+     1024    80000000   2120000   1500000   298000   212000
+```
+
+These figures are very close to what can be achieved on the Intel Coffee
+Lake when compiling with `no_avx2`, i.e. the Cortex-A76 with NEON
+achieves about cycle-to-cycle parity with the Intel with SSE2, but the
+Intel can get an extra edge with AVX2. Some newer/larger ARM CPUs may
+implement the SVE or SVE2 opcodes, with extended register size, but they
+seem to be a rarity (apparently, even the Apple M1 to M4 CPUs stick to
+NEON and do not support SVE).
+
+On a 64-bit RISC-V system (SiFive U74 core), which is much smaller/low-end
+than the two previous, the following is achieved:
+
+```
+    degree    keygen      sign     +sign    verify  +verify
+   ---------------------------------------------------------
+      512    55000000   4530000   3370000   387000   274000
+     1024   198000000   9170000   7050000   801000   566000
+```
+
+To put things into perspective, FN-DSA/512 is substantially faster than
+RSA-2048 on all these systems (RSA is especially efficient for signature
+verification, and OpenSSL's implementation on x86 has been very
+optimized along the years, so that on the `x86_64` RSA-2048 verification
+is about as fast as FN-DSA/512; for all other operations, FN-DSA/512 is
+faster, sometimes by a large amount, e.g. on the ARM Cortex-A76
+signature generation with this code is about 8 times faster than
+OpenSSL's RSA-2048).
 
 ## Specific Variant
 

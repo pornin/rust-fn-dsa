@@ -124,7 +124,8 @@ macro_rules! vrfy_key_impl {
         h: [u16; 1 << ($logn_max)],
         hashed_key: [u8; 64],
 
-        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+        #[cfg(all(not(feature = "no_avx2"),
+            any(target_arch = "x86_64", target_arch = "x86")))]
         use_avx2: bool,
     }
 
@@ -138,7 +139,8 @@ macro_rules! vrfy_key_impl {
             sh.flip();
             sh.extract(&mut hashed_key);
 
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+            #[cfg(all(not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")))]
             {
                 if fn_dsa_comm::has_avx2() {
                     unsafe {
@@ -153,7 +155,8 @@ macro_rules! vrfy_key_impl {
             let logn = decode_inner($logn_min, $logn_max, &mut h[..], src)?;
             Some(Self {
                 logn, h, hashed_key,
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+                #[cfg(all(not(feature = "no_avx2"),
+                    any(target_arch = "x86_64", target_arch = "x86")))]
                 use_avx2: false,
             })
         }
@@ -166,7 +169,8 @@ macro_rules! vrfy_key_impl {
             let mut tmp_i16 = [0i16; 1 << ($logn_max)];
             let mut tmp_u16 = [0u16; 2 << ($logn_max)];
 
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+            #[cfg(all(not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")))]
             if self.use_avx2 {
                 unsafe {
                     return verify_avx2_inner(logn,
@@ -279,7 +283,8 @@ fn verify_inner(logn: u32, h: &[u16], hashed_key: &[u8],
 }
 
 // AVX2-optimized implementation of key decoding.
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 #[target_feature(enable = "avx2")]
 unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
     h: &mut [u16], src: &[u8]) -> Option<u32>
@@ -308,7 +313,8 @@ unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
 }
 
 // AVX2-optimized implementation of verification.
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 #[target_feature(enable = "avx2")]
 unsafe fn verify_avx2_inner(logn: u32, h: &[u16], hashed_key: &[u8],
     sig: &[u8], ctx: &DomainContext, id: &HashIdentifier, hv: &[u8],
@@ -415,7 +421,8 @@ mod tests {
                 &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
                 &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
             e_sig[50] ^= 0x01;
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+            #[cfg(all(not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")))]
             if fn_dsa_comm::has_avx2() {
                 unsafe {
                     assert!(verify_avx2_inner(logn, &vk.h[..n], &vk.hashed_key,

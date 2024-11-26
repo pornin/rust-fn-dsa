@@ -21,3 +21,6 @@ hex.workspace = true
 [features]
 default = []
 small_context = []
+no_avx2 = []
+div_emu = []
+sqrt_emu = []

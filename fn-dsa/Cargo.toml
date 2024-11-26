@@ -20,6 +20,10 @@ fn-dsa-vrfy = { version = "0.1", path = "../fn-dsa-vrfy" }
 [dev-dependencies]
 hex.workspace = true
 
+[features]
+default = []
+no_avx2 = []
+
 [[bench]]
 name = "keygen"
 path = "benches/keygen.rs"

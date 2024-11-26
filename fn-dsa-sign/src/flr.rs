@@ -66,14 +66,16 @@ use zeroize::DefaultIsZeroes;
 #[cfg(any(
     target_arch = "x86_64",
     target_arch = "aarch64",
-    target_arch = "arm64ec"))]
+    target_arch = "arm64ec",
+    target_arch = "riscv64"))]
 #[path = "flr_native.rs"]
 mod backend;
 
 #[cfg(not(any(
     target_arch = "x86_64",
     target_arch = "aarch64",
-    target_arch = "arm64ec")))]
+    target_arch = "arm64ec",
+    target_arch = "riscv64")))]
 #[path = "flr_emu.rs"]
 mod backend;
 

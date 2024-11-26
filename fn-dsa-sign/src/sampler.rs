@@ -5,6 +5,9 @@ use super::flr::FLR;
 use super::poly::*;
 use fn_dsa_comm::PRNG;
 
+#[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+use core::arch::x86::*;
+
 // ========================================================================
 // Gaussian sampling
 // ========================================================================
@@ -105,9 +108,21 @@ impl<T: PRNG> Sampler<T> {
         Self { rng, logn }
     }
 
+    // SSE2 variant of next() (for 32-bit x86).
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    #[allow(dead_code)]
+    pub(crate) fn next(&mut self, mu: FLR, isigma: FLR) -> i32 {
+        unsafe {
+            let fmu: f64 = core::mem::transmute(mu);
+            let fisigma: f64 = core::mem::transmute(isigma);
+            self.next_sse2(_mm_set_sd(fmu), _mm_set_sd(fisigma))
+        }
+    }
+
     // Sample the next small integer, using the proper Gaussian
     // distribution with centre mu and inverse of the standard
     // deviation isigma.
+    #[cfg(not(all(target_arch = "x86", target_feature = "sse2")))]
     pub(crate) fn next(&mut self, mu: FLR, isigma: FLR) -> i32 {
 
         // Centre is mu. We split it into s + r, for an integer
@@ -171,6 +186,51 @@ impl<T: PRNG> Sampler<T> {
         }
     }
 
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    unsafe fn next_sse2(&mut self, mu: __m128d, isigma: __m128d) -> i32 {
+        // 0.5
+        let h: __m128d = core::mem::transmute([
+            FLR::scaled(4503599627370496, -53),
+            FLR::scaled(4503599627370496, -53),
+        ]);
+        // 1/(2*(1.8205^2))
+        let inv2ss: __m128d = core::mem::transmute([
+            INV_2SQRSIGMA0, INV_2SQRSIGMA0,
+        ]);
+
+        // Split mu into s + r
+        let s = _mm_cvttsd_si32(mu);
+        let s = s - _mm_comilt_sd(mu, _mm_cvtsi32_sd(_mm_setzero_pd(), s));
+        let r = _mm_sub_sd(mu, _mm_cvtsi32_sd(_mm_setzero_pd(), s));
+
+        // dss = 1/(2*sigma^2) = 0.5*(isigma^2)
+        let dss = _mm_mul_sd(_mm_mul_sd(isigma, isigma), h);
+
+        // ccs = sigma_min / sigma = sigma_min * isigma
+        let psm: *const f64 = core::mem::transmute((&SIGMA_MIN).as_ptr());
+        let ccs = _mm_mul_sd(isigma,
+            _mm_load_sd(psm.wrapping_add(self.logn as usize)));
+
+        loop {
+            // z from a Gaussian, and bit b to make a "bimodal" distribution.
+            let z0 = self.gaussian0();
+            let b = (self.rng.next_u8() as i32) & 1;
+            let z = b + ((b << 1) - 1) * z0;
+
+            // Rejection sampling.
+            let x = _mm_sub_sd(_mm_cvtsi32_sd(_mm_setzero_pd(), z), r);
+            let x = _mm_mul_sd(_mm_mul_sd(x, x), dss);
+            let x = _mm_sub_sd(x, _mm_mul_sd(
+                _mm_cvtsi32_sd(_mm_setzero_pd(), z0 * z0),
+                inv2ss));
+            if self.ber_exp_sse2(x, ccs) {
+                // Rejection sampling was centred on r, but the actual
+                // centre is mu = s + r.
+                return s + z;
+            }
+        }
+    }
+
     // Sample a value from a given half-Gaussian centred on zero; only
     // non-negative values are returned. 72 bits from the random source
     // are used.
@@ -195,6 +255,7 @@ impl<T: PRNG> Sampler<T> {
     }
 
     // Sample a bit with probability ccs*exp(-x) (with x >= 0).
+    #[cfg(not(all(target_arch = "x86", target_feature = "sse2")))]
     fn ber_exp(&mut self, x: FLR, ccs: FLR) -> bool {
         // Reduce x modulo log(2): x = s*log(2) + r, with s an integer,
         // and 0 <= r < log(2). We can use trunc() because x >= 0
@@ -261,6 +322,83 @@ impl<T: PRNG> Sampler<T> {
         false
     }
 
+    // Variant of ber_exp() for 32-bit x86 with SSE2.
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    unsafe fn ber_exp_sse2(&mut self, x: __m128d, ccs: __m128d) -> bool {
+        let log2: __m128d = core::mem::transmute([LOG2, LOG2]);
+        let invlog2: __m128d = core::mem::transmute([INV_LOG2, INV_LOG2]);
+
+        // x = s*log(2) + r
+        let si = _mm_cvttsd_si32(_mm_mul_sd(x, invlog2));
+        let r = _mm_sub_sd(x,
+            _mm_mul_sd(_mm_cvtsi32_sd(_mm_setzero_pd(), si), log2));
+
+        // saturate s at 63
+        let mut s = si as u32;
+        s |= 63u32.wrapping_sub(s) >> 26;
+
+        // z <- ccs*exp(-x), scaled, then right-shift by s.
+        let z = (Self::expm_p63_sse2(r, ccs) << 1).wrapping_sub(1);
+        let z = (z ^ ((z ^ (z >> 32)) & ((s >> 5) as u64).wrapping_neg()))
+            >> (s & 31);
+
+        // rejection sampling
+        for i in 0..8 {
+            let w = self.rng.next_u8();
+            let bz = (z >> (56 - (i << 3))) as u8;
+            if w != bz {
+                return w < bz;
+            }
+        }
+        false
+    }
+
+    // Variant of expm_p63() for 32-bit x86 with SSE2.
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    unsafe fn expm_p63_sse2(r: __m128d, ccs: __m128d) -> u64 {
+        #[inline(always)]
+        unsafe fn mtwop63(x: __m128d) -> i64 {
+            // 2^21
+            let twop21: __m128d = core::mem::transmute([
+                FLR::scaled(4503599627370496, -31),
+                FLR::scaled(4503599627370496, -31),
+            ]);
+            let x = _mm_mul_sd(x, twop21);
+            let z2 = _mm_cvttsd_si32(x);
+            let x = _mm_sub_sd(x, _mm_cvtsi32_sd(_mm_setzero_pd(), z2));
+            let x = _mm_mul_sd(x, twop21);
+            let z1 = _mm_cvttsd_si32(x);
+            let x = _mm_sub_sd(x, _mm_cvtsi32_sd(_mm_setzero_pd(), z2));
+            let x = _mm_mul_sd(x, twop21);
+            let z0 = _mm_cvttsd_si32(x);
+            ((z2 as i64) << 42) + ((z1 as i64) << 21) + (z0 as i64)
+        }
+
+        let mut y = FLR::EXPM_COEFFS[0];
+        let z = (mtwop63(r) as u64) << 1;
+        let w = (mtwop63(ccs) as u64) << 1;
+        let (z0, z1) = (z as u32, (z >> 32) as u32);
+        for i in 1..FLR::EXPM_COEFFS.len() {
+            let (y0, y1) = (y as u32, (y >> 32) as u32);
+            let f = (z0 as u64) * (y0 as u64);
+            let a = (z0 as u64) * (y1 as u64) + (f >> 32);
+            let b = (z1 as u64) * (y0 as u64);
+            let c = (a >> 32) + (b >> 32)
+                + ((((a as u32) as u64) + ((b as u32) as u64)) >> 32)
+                + (z1 as u64) * (y1 as u64);
+            y = FLR::EXPM_COEFFS[i].wrapping_sub(c);
+        }
+        let (w0, w1) = (w as u32, (w >> 32) as u32);
+        let (y0, y1) = (y as u32, (y >> 32) as u32);
+        let f = (w0 as u64) * (y0 as u64);
+        let a = (w0 as u64) * (y1 as u64) + (f >> 32);
+        let b = (w1 as u64) * (y0 as u64);
+        let y = (a >> 32) + (b >> 32)
+            + ((((a as u32) as u64) + ((b as u32) as u64)) >> 32)
+            + (w1 as u64) * (y1 as u64);
+        y
+    }
+
     // Fast Fourier Sampling.
     // The target vector is t, provided as two polynomials t0 and t1.
     // The Gram matrix is provided (G = [[g00, g01], [adj(g01), g11]]).
@@ -282,6 +420,83 @@ impl<T: PRNG> Sampler<T> {
         g00: &mut [FLR], g01: &mut [FLR], g11: &mut [FLR], tmp: &mut [FLR])
     {
         // When logn = 1, arrays have length 2; we unroll the last steps.
+        #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+        if logn == 1 {
+            unsafe {
+                use core::mem::transmute;
+
+                let tt0: *mut f64 = transmute(t0.as_mut_ptr());
+                let tt1: *mut f64 = transmute(t1.as_mut_ptr());
+                let gg00: *mut f64 = transmute(g00.as_mut_ptr());
+                let gg01: *mut f64 = transmute(g01.as_mut_ptr());
+                let gg11: *mut f64 = transmute(g11.as_mut_ptr());
+                let one: __m128d = transmute([FLR::ONE, FLR::ONE]);
+                let cz: __m128d = transmute([FLR::ZERO, FLR::NZERO]);
+
+                let pi: *const f64 = transmute((&INV_SIGMA).as_ptr());
+                let isigma = _mm_load_sd(pi.wrapping_add(self.logn as usize));
+
+                // Decompose G into LDL.
+                let g00_re = _mm_load_sd(gg00);
+                let g01_cc = _mm_loadu_pd(gg01);
+                let g11_re = _mm_load_sd(gg11);
+                let inv_g00_re = _mm_div_sd(one, g00_re);
+                let inv_g00 = _mm_shuffle_pd(inv_g00_re, inv_g00_re, 0);
+                let mu = _mm_mul_pd(g01_cc, inv_g00);
+                let zo = _mm_mul_pd(mu, g01_cc);
+                let zo_re = _mm_add_sd(zo, _mm_shuffle_pd(zo, zo, 1));
+                let d00_re = g00_re;
+                let l01 = _mm_xor_pd(cz, mu);
+                let d11_re = _mm_sub_sd(g11_re, zo_re);
+
+                // No split on d00 and d11
+
+                // t1 split is trivial
+                let w = _mm_loadu_pd(tt1);
+                let w0 = w;
+                let w1 = _mm_shuffle_pd(w, w, 3);
+
+                // Recursive call (right sub-tree)
+                let leaf = _mm_mul_sd(
+                    _mm_sqrt_sd(_mm_setzero_pd(), d11_re),
+                    isigma);
+                let y0 = _mm_cvtsi32_sd(_mm_setzero_pd(),
+                    self.next_sse2(w0, leaf));
+                let y1 = _mm_cvtsi32_sd(_mm_setzero_pd(),
+                    self.next_sse2(w1, leaf));
+
+                // Merge is trivial
+
+                // tb0 = t0 + (t1 - z1)*l10 (into [x0, x1]).
+                // z1 is moved into t1.
+                let y = _mm_shuffle_pd(y0, y1, 0);
+                let a = _mm_sub_pd(w, y);
+                let b1 = _mm_mul_pd(a, _mm_xor_pd(cz, l01));
+                let b2 = _mm_mul_pd(a, _mm_shuffle_pd(l01, l01, 1));
+                let b = _mm_add_pd(
+                    _mm_shuffle_pd(b1, b2, 2),
+                    _mm_shuffle_pd(b1, b2, 1));
+                let x = _mm_add_pd(b, _mm_loadu_pd(tt0));
+                _mm_storeu_pd(tt1, y);
+
+                // Second recursive invocation
+                let x0 = x;
+                let x1 = _mm_shuffle_pd(x, x, 3);
+                let leaf = _mm_mul_sd(
+                    _mm_sqrt_sd(_mm_setzero_pd(), d00_re),
+                    isigma);
+                let y0 = _mm_cvtsi32_sd(_mm_setzero_pd(),
+                    self.next_sse2(x0, leaf));
+                let y1 = _mm_cvtsi32_sd(_mm_setzero_pd(),
+                    self.next_sse2(x1, leaf));
+                _mm_store_sd(tt0, y0);
+                _mm_store_sd(tt0.wrapping_add(1), y1);
+
+                return;
+            }
+        }
+
+        #[cfg(not(all(target_arch = "x86", target_feature = "sse2")))]
         if logn == 1 {
             // Decompose G into LDL. g00 and g11 are self-adjoint and thus
             // use one coefficient each.

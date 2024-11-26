@@ -16,3 +16,7 @@ rand_core.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+
+[features]
+default = []
+no_avx2 = []

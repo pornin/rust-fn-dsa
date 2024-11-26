@@ -161,14 +161,14 @@ macro_rules! sign_key_impl {
         // tested. We do not do that on plain x86, because plain x86 uses
         // the emulated floating-point, not the native types (on 32-bit
         // x86, native floating-point is x87, not SSE2).
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
         use_avx2: bool,
     }
 
     impl $typename {
 
         fn decode_key(&mut self, src: &[u8]) -> Option<u32> {
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
             if self.use_avx2 {
                 unsafe {
                     return sign_avx2::decode_avx2_inner($logn_min, $logn_max,
@@ -190,7 +190,7 @@ macro_rules! sign_key_impl {
         fn compute_basis(&mut self) {
             let n = 1usize << self.logn;
 
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
             if self.use_avx2 {
                 unsafe {
                     sign_avx2::compute_basis_avx2_inner(self.logn,
@@ -228,7 +228,7 @@ macro_rules! sign_key_impl {
                 #[cfg(not(feature = "small_context"))]
                 basis,
                 logn: 0,
-                #[cfg(target_arch = "x86_64")]
+                #[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
                 use_avx2: fn_dsa_comm::has_avx2(),
             };
             sk.logn = sk.decode_key(src)?;
@@ -254,7 +254,7 @@ macro_rules! sign_key_impl {
         {
             let n = 1usize << self.logn;
 
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
             if self.use_avx2 {
                 unsafe {
                     sign_avx2::sign_avx2_inner::<T, shake::SHAKE256x4>(
@@ -294,7 +294,7 @@ sign_key_impl!(SigningKey1024, 10, 10);
 // meant only for research and testing purposes.
 sign_key_impl!(SigningKeyWeak, 2, 8);
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
 mod sign_avx2;
 
 // Decode a private key.
@@ -1044,7 +1044,7 @@ mod tests {
         assert!(sig_raw == KAT_512_sig_raw);
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
     #[test]
     fn sign_avx2_512() {
         if !fn_dsa_comm::has_avx2() {

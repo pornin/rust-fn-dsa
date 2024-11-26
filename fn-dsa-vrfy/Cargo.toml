@@ -16,3 +16,7 @@ fn-dsa-comm = { version = "0.1", path = "../fn-dsa-comm" }
 
 [dev-dependencies]
 hex.workspace = true
+
+[features]
+default = []
+no_avx2 = []

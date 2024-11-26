@@ -721,7 +721,8 @@ pub struct SHAKE256x4 {
     state: [KeccakState; 4],
     buf: [u8; SHAKE256x4_BUF_LEN],
     ptr: usize,
-    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    #[cfg(all(not(feature = "no_avx2"),
+        any(target_arch = "x86_64", target_arch = "x86")))]
     use_avx2: bool,
 }
 
@@ -730,7 +731,8 @@ pub struct SHAKE256x4 {
 // Keccak-f permutation invocation.
 const SHAKE256x4_BUF_LEN: usize = 4 * 136;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 #[path = "shake256x4_avx2.rs"]
 mod shake256x4_avx2;
 
@@ -740,8 +742,8 @@ impl SHAKE256x4 {
     ///
     /// The PRNG output is deterministic for any given seed value.
     pub fn new(seed: &[u8]) -> Self {
-        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-        //if is_x86_feature_detected!("avx2")
+        #[cfg(all(not(feature = "no_avx2"),
+            any(target_arch = "x86_64", target_arch = "x86")))]
         if super::has_avx2() {
             let mut sh = Self {
                 state: [
@@ -769,7 +771,8 @@ impl SHAKE256x4 {
             ],
             buf: [0u8; SHAKE256x4_BUF_LEN],
             ptr: SHAKE256x4_BUF_LEN,
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+            #[cfg(all(not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")))]
             use_avx2: false,
         }
     }
@@ -778,7 +781,8 @@ impl SHAKE256x4 {
     fn refill(&mut self) {
         self.ptr = 0;
 
-        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+        #[cfg(all(not(feature = "no_avx2"),
+            any(target_arch = "x86_64", target_arch = "x86")))]
         if self.use_avx2 {
             unsafe {
                 shake256x4_avx2::refill(self);

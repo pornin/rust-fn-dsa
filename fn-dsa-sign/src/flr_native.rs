@@ -361,6 +361,7 @@ impl FLR {
     // This is a helper function used in the implementation of the FFT
     // and included in the FLR API because different implementations might
     // do it very differently.
+    #[allow(dead_code)]
     pub(crate) fn slice_div2e(f: &mut [FLR], e: u32) {
         let ee = Self::INV_POW2[(e + 127) as usize];
         for i in 0..f.len() {
@@ -370,46 +371,111 @@ impl FLR {
 
     #[inline]
     pub(crate) fn rint(self) -> i64 {
-        // Suppose that x >= 0. If x >= 2^52, then it is already an
-        // integer. Otherwise, computing x + 2^52 will yield a value
-        // that is rounded to the nearest integer with exactly the right
-        // rules (roundTiesToEven). For constant-time processing we must
-        // do the computation for both x >= 0 and x < 0 cases, then
-        // select the right output.
-        let x = self.0;
-        let sx = (x - 1.0) as i64;
-        let tx = x as i64;
-        let rp = ((x + 4503599627370496.0) as i64) - 4503599627370496;
-        let rn = ((x - 4503599627370496.0) as i64) + 4503599627370496;
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use core::arch::x86_64::*;
 
-        // Assuming that |x| < 2^52:
-        // If sx >= 0, then the result is rp; otherwise, result is rn.
-        // We use the fact that when x is close to 0 (|x| <= 0.25), then
-        // both rp and rn are correct (they are both zero); but if x is
-        // not close to 0, then trunc(x - 1.0) (i.e. sx) has the correct
-        // sign. Thus, we use rp if sx >= 0, rn otherwise.
-        let z = rp ^ ((sx >> 63) & (rp ^ rn));
+            // On x86_64, we have SSE2, and there is an opcode that
+            // does exactly what we need. The conversion from f64 to
+            // __m128d is really a no-op, since f64 is itself backed
+            // by SSE2.
+            return _mm_cvtsd_si64(_mm_set_sd(self.0));
+        }
 
-        // If the twelve upper bits of tx are not all-zeros or all-ones,
-        // then tx >= 2^52 or tx < -2^52, and is exact; in that case,
-        // we replace z with tx.
-        let hi = (tx as u64).wrapping_add(1u64 << 52) >> 52;
-        let m = (hi.wrapping_sub(2) as i64) >> 16;
-        tx ^ (m & (z ^ tx))
+        #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
+        unsafe {
+            use core::arch::aarch64::*;
+
+            // On aarch64, we use the NEON opcodes.
+            return vcvtnd_s64_f64(self.0);
+        }
+
+        #[cfg(target_arch = "riscv64")]
+        unsafe {
+            use core::arch::asm;
+            let mut d: i64;
+            asm!("fcvt.l.d {d}, {a}, rne", a = in(freg) self.0, d = out(reg) d);
+            return d;
+        }
+
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm64ec",
+            target_arch = "riscv64")))]
+        {
+            // Suppose that x >= 0. If x >= 2^52, then it is already an
+            // integer. Otherwise, computing x + 2^52 will yield a value
+            // that is rounded to the nearest integer with exactly the right
+            // rules (roundTiesToEven). For constant-time processing we must
+            // do the computation for both x >= 0 and x < 0 cases, then
+            // select the right output.
+            let x = self.0;
+            let sx = (x - 1.0) as i64;
+            let tx = x as i64;
+            let rp = ((x + 4503599627370496.0) as i64) - 4503599627370496;
+            let rn = ((x - 4503599627370496.0) as i64) + 4503599627370496;
+
+            // Assuming that |x| < 2^52:
+            // If sx >= 0, then the result is rp; otherwise, result is rn.
+            // We use the fact that when x is close to 0 (|x| <= 0.25), then
+            // both rp and rn are correct (they are both zero); but if x is
+            // not close to 0, then trunc(x - 1.0) (i.e. sx) has the correct
+            // sign. Thus, we use rp if sx >= 0, rn otherwise.
+            let z = rp ^ ((sx >> 63) & (rp ^ rn));
+
+            // If the twelve upper bits of tx are not all-zeros or all-ones,
+            // then tx >= 2^52 or tx < -2^52, and is exact; in that case,
+            // we replace z with tx.
+            let hi = (tx as u64).wrapping_add(1u64 << 52) >> 52;
+            let m = (hi.wrapping_sub(2) as i64) >> 16;
+            return tx ^ (m & (z ^ tx));
+        }
     }
 
     #[inline(always)]
     pub(crate) fn floor(self) -> i64 {
-        // We use the native conversion (which is a trunc()) and then
-        // subtract 1 if that yields a value greater than the source.
-        // On x86_64, comparison uses SSE2 opcode cmpsd which is then
-        // extracted into an integer register as 0 or -1, so the
-        // final subtraction will be done in a branchless way.
-        // On aarch64, the comparison should use fcmp, and then use the
-        // flags in a csel, cset, adc or sbc opcode.
-        let x = self.0;
-        let r = x as i64;
-        r - ((x < (r as f64)) as i64)
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use core::arch::x86_64::*;
+            let x = self.0;
+            let r = x as i64;
+            let t = _mm_comilt_sd(_mm_set_sd(x),
+                _mm_cvtsi64x_sd(_mm_setzero_pd(), r));
+            return r - (t as i64);
+        }
+
+        #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
+        unsafe {
+            use core::arch::aarch64::*;
+            return vcvtmd_s64_f64(self.0);
+        }
+
+        #[cfg(target_arch = "riscv64")]
+        unsafe {
+            use core::arch::asm;
+            let mut d: i64;
+            asm!("fcvt.l.d {d}, {a}, rdn", a = in(freg) self.0, d = out(reg) d);
+            return d;
+        }
+
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm64ec",
+            target_arch = "riscv64")))]
+        {
+            // We use the native conversion (which is a trunc()) and then
+            // subtract 1 if that yields a value greater than the source.
+            // On x86_64, comparison uses SSE2 opcode cmpsd which is then
+            // extracted into an integer register as 0 or -1, so the
+            // final subtraction will be done in a branchless way.
+            // On aarch64, the comparison should use fcmp, and then use the
+            // flags in a csel, cset, adc or sbc opcode.
+            let x = self.0;
+            let r = x as i64;
+            return r - ((x < (r as f64)) as i64);
+        }
     }
 
     #[inline(always)]
@@ -443,6 +509,16 @@ impl FLR {
         Self(self.0 * self.0)
     }
 
+    #[cfg(feature = "div_emu")]
+    #[inline]
+    pub(crate) fn set_div(&mut self, other: Self) {
+        let x = u64::from_le_bytes(self.0.to_le_bytes());
+        let y = u64::from_le_bytes(other.0.to_le_bytes());
+        let z = Self::div_emu(x, y);
+        self.0 = f64::from_le_bytes(z.to_le_bytes());
+    }
+
+    #[cfg(not(feature = "div_emu"))]
     #[inline(always)]
     pub(crate) fn set_div(&mut self, other: Self) {
         self.0 /= other.0;
@@ -460,27 +536,137 @@ impl FLR {
     }
 
     pub(crate) fn sqrt(self) -> Self {
-        // f64::sqrt() is in std but not in core. We use the
-        // architecture-specific intrinsics.
+        #[cfg(not(feature = "sqrt_emu"))]
+        {
+            // f64::sqrt() is in std but not in core. We use the
+            // architecture-specific intrinsics.
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                // x86 (64-bit): use SSE2
+                use core::arch::x86_64::*;
+                let x = _mm_set_sd(self.0);
+                let x = _mm_sqrt_pd(x);
+                return Self(_mm_cvtsd_f64(x));
+            }
 
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            use core::arch::x86_64::*;
-            let x = _mm_set_sd(self.0);
-            let x = _mm_sqrt_pd(x);
-            return Self(_mm_cvtsd_f64(x));
+            #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
+            unsafe {
+                // An f64 is already in a SIMD register, we use a transmute
+                // to make it look like a float64x1_t, but that should be
+                // a no-op in compiled code.
+                use core::arch::aarch64::*;
+                let x: float64x1_t = core::mem::transmute(self.0);
+                let x = vsqrt_f64(x);
+                return Self(core::mem::transmute(x));
+            }
+
+            #[cfg(target_arch = "riscv64")]
+            unsafe {
+                use core::arch::asm;
+                let mut d: f64;
+                asm!("fsqrt.d {d}, {a}", a = in(freg) self.0, d = out(freg) d);
+                return Self(d);
+            }
         }
 
-        #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
-        unsafe {
-            // An f64 is already in a SIMD register, we use a transmute
-            // to make it look like a float64x1_t, but that should be
-            // a no-op in compiled code.
-            use core::arch::aarch64::*;
-            let x: float64x1_t = core::mem::transmute(self.0);
-            let x = vsqrt_f64(x);
-            return Self(core::mem::transmute(x));
+        #[cfg(any(feature = "sqrt_emu",
+            not(any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                target_arch = "arm64ec",
+                target_arch = "riscv64"))))]
+        {
+            let x = u64::from_le_bytes(self.0.to_le_bytes());
+            let z = Self::sqrt_emu(x);
+            return Self(f64::from_le_bytes(z.to_le_bytes()));
         }
+    }
+
+    // Emulated division with integer operations only; this is meant for
+    // architectures where native floating-point can be used, but the
+    // division operation is not constant-time enough.
+    #[cfg(feature = "div_emu")]
+    fn div_emu(x: u64, y: u64) -> u64 {
+        // see FLR::set_div() in flr_emu.rs for details
+        const M52: u64 = 0x000FFFFFFFFFFFFF;
+        let mut xu = (x & M52) | (1u64 << 52);
+        let yu = (y & M52) | (1u64 << 52);
+
+        let mut q = 0;
+        for _ in 0..55 {
+            let b = (xu.wrapping_sub(yu) >> 63).wrapping_sub(1);
+            xu -= b & yu;
+            q |= b & 1;
+            xu <<= 1;
+            q <<= 1;
+        }
+
+        q |= (xu | xu.wrapping_neg()) >> 63;
+
+        let es = ((q >> 55) as u32) & 1;
+        q = (q >> es) | (q & 1);
+
+        let ex = ((x >> 52) as i32) & 0x7FF;
+        let ey = ((y >> 52) as i32) & 0x7FF;
+        let e = ex - ey - 55 + (es as i32);
+
+        let s = (x ^ y) >> 63;
+
+        let dz = (ex - 1) >> 16;
+        let e = e ^ (dz & (e ^ -1076));
+        let dm = !((dz as i64) as u64);
+        let s = s & dm;
+        q &= dm;
+        let cc = (0xC8u64 >> ((q as u32) & 7)) & 1;
+        (s << 63) + (((e + 1076) as u64) << 52) + (q >> 2) + cc
+    }
+
+    // Emulated square root with integer operations only; this is meant for
+    // architectures where native floating-point can be used, but the
+    // square root operation is not constant-time enough. It is also used
+    // for architecture other than the ones supported directly in sqrt()
+    // (square root extraction normally uses a standard library function,
+    // which we cannot use since this is a no_std library).
+    #[cfg(any(feature = "sqrt_emu", not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "arm64ec",
+        target_arch = "riscv64"))))]
+    fn sqrt_emu(x: u64) -> u64 {
+        // see FLR::sqrt() in flr_emu.rs for details
+        const M52: u64 = 0x000FFFFFFFFFFFFF;
+        let mut xu = (x & M52) | (1u64 << 52);
+        let ex = ((x >> 52) as u32) & 0x7FF;
+        let mut e = (ex as i32) - 1023;
+
+        xu += ((-(e & 1) as i64) as u64) & xu;
+        e >>= 1;
+
+        xu <<= 1;
+
+        let mut q = 0;
+        let mut s = 0;
+        let mut r = 1u64 << 53;
+        for _ in 0..54 {
+            let t = s + r;
+            let b = (xu.wrapping_sub(t) >> 63).wrapping_sub(1);
+            s += (r << 1) & b;
+            xu -= t & b;
+            q += r & b;
+            xu <<= 1;
+            r >>= 1;
+        }
+
+        q <<= 1;
+        q |= (xu | xu.wrapping_neg()) >> 63;
+
+        e -= 54;
+
+        q &= (((ex + 0x7FF) >> 11) as u64).wrapping_neg();
+        let t = ((q >> 54) as u32).wrapping_neg();
+        let e = ((e + 1076) as u32) & t;
+        let cc = (0xC8u64 >> ((q as u32) & 7)) & 1;
+        ((e as u64) << 52) + (q >> 2) + cc
     }
 
     pub(crate) fn expm_p63(self, ccs: Self) -> u64 {
@@ -495,12 +681,15 @@ impl FLR {
         let mut y = Self::EXPM_COEFFS[0];
         let z = (self.mul2p63().trunc() as u64) << 1;
 
-        // On x86_64 we can assume that 64x64->128 multiplications are
-        // constant-time (this is true on most/all x86 CPUs that support
-        // 64-bit mode); we cannot do the same assumption on other
-        // systems (e.g. ARM Cortex A53 and A55 CPUs support aarch64
-        // but their 64x64 multiplications are not constant-time).
-        #[cfg(target_arch = "x86_64")]
+        // On 64-bit platforms, we assume that 64x64->128 multiplications
+        // are constant-time. This is known to be slightly wrong on some
+        // low-end aarch64 (e.g. ARM Cortex A53 and A55), where
+        // multiplications are a bit faster when operands are small (i.e.
+        // fit on 32 bits).
+        #[cfg(any(target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm64ec",
+            target_arch = "riscv64"))]
         {
             for i in 1..Self::EXPM_COEFFS.len() {
                 // Compute z*y over 128 bits, but keep only the top 64 bits.
@@ -515,7 +704,10 @@ impl FLR {
             return (((z as u128) * (y as u128)) >> 64) as u64;
         }
 
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(not(any(target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm64ec",
+            target_arch = "riscv64")))]
         {
             let (z0, z1) = (z as u32, (z >> 32) as u32);
             for i in 1..Self::EXPM_COEFFS.len() {

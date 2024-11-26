@@ -69,16 +69,20 @@ mod poly;
 mod vect;
 mod zint31;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 mod ntru_avx2;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 mod poly_avx2;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 mod vect_avx2;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 mod zint31_avx2;
 
 use fn_dsa_comm::{codec, mq, shake};
@@ -213,7 +217,8 @@ fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
     let (h, t16) = tmp_u16.split_at_mut(n);
 
     loop {
-        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+        #[cfg(all(not(feature = "no_avx2"),
+            any(target_arch = "x86_64", target_arch = "x86")))]
         if fn_dsa_comm::has_avx2() {
             unsafe {
                 keygen_from_seed_avx2(
@@ -306,7 +311,8 @@ fn keygen_from_seed(logn: u32, seed: &[u8],
 }
 
 // keygen_from_seed() variant, with AVX2 optimizations.
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
 #[target_feature(enable = "avx2")]
 unsafe fn keygen_from_seed_avx2(logn: u32, seed: &[u8],
     f: &mut [i8], g: &mut [i8], F: &mut [i8], G: &mut [i8],
@@ -770,7 +776,8 @@ mod tests {
             let hv = sh.finalize();
             assert!(hv[..] == hex::decode(rh[i]).unwrap());
 
-            #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+            #[cfg(all(not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")))]
             if fn_dsa_comm::has_avx2() {
                 unsafe {
                     keygen_from_seed_avx2(logn, seed,
@@ -831,7 +838,8 @@ mod tests {
                     assert!(r[i] == 0);
                 }
 
-                #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+                #[cfg(all(not(feature = "no_avx2"),
+                    any(target_arch = "x86_64", target_arch = "x86")))]
                 if fn_dsa_comm::has_avx2() {
                     let mut f2 = [0i8; 1024];
                     let mut g2 = [0i8; 1024];
