@@ -1,6 +1,6 @@
 [package]
 name = "fn-dsa-kgen"
-version = "0.1.0"
+version = "0.2.0"
 authors.workspace = true
 categories.workspace = true
 description.workspace = true
@@ -12,7 +12,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-fn-dsa-comm = { version = "0.1", path = "../fn-dsa-comm" }
+fn-dsa-comm = { version = "0.2", path = "../fn-dsa-comm" }
 zeroize.workspace = true
 
 [dev-dependencies]
