@@ -14,6 +14,9 @@ rust-version.workspace = true
 [dependencies]
 rand_core.workspace = true
 
+[target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
+cpufeatures.workspace = true
+
 [dev-dependencies]
 hex.workspace = true
 

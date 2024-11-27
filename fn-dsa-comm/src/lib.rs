@@ -226,6 +226,10 @@ pub trait PRNG: Copy + Clone {
     fn next_u64(&mut self) -> u64;
 }
 
+#[cfg(all(not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")))]
+cpufeatures::new!(cpuid_avx2, "avx2");
+
 /// Do a rutime check for AVX2 support (x86 and x86_64 only).
 ///
 /// This is a specialized subcase of the is_x86_feature_detected macro,
@@ -233,28 +237,5 @@ pub trait PRNG: Copy + Clone {
 #[cfg(all(not(feature = "no_avx2"),
     any(target_arch = "x86_64", target_arch = "x86")))]
 pub fn has_avx2() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::{__cpuid, __cpuid_count, _xgetbv};
-
-    #[cfg(target_arch = "x86")]
-    use core::arch::x86::{__cpuid, __cpuid_count, _xgetbv};
-
-    unsafe {
-        // Check that we can access function parameter 7 (where the AVX2
-        // support bit resides).
-        let r = __cpuid(0);
-        if r.eax < 7 {
-            return false;
-        }
-
-        // Check that AVX2 is supported by the CPU.
-        let r = __cpuid_count(7, 0);
-        if (r.ebx & (1 << 5)) == 0 {
-            return false;
-        }
-
-        // Check that the full-size (256-bit) ymm registers are enabled.
-        let r = _xgetbv(0);
-        return (r & 0x06) == 0x06;
-    }
+    cpuid_avx2::get()
 }

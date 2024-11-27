@@ -23,6 +23,7 @@ rust-version = "1.82"
 # main dependencies
 rand_core = "0.6"
 zeroize = { version = "1.8", features = [ "zeroize_derive" ] }
+cpufeatures = "0.2"
 # dev-only dependencies
 sha2 = "0.10"
 hex = "0.4.3"
