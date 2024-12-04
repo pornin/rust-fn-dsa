@@ -1,4 +1,4 @@
-# FN-DSA
+# FN-DSA (in Rust)
 
 FN-DSA is a new *upcoming* post-quantum signature scheme, currently
 being defined by NIST as part of their [Post-Quantum Cryptography
