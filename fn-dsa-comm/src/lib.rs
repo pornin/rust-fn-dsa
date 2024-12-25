@@ -14,12 +14,14 @@ pub mod mq;
 pub mod shake;
 
 /// Specialized versions of `mq` which use AVX2 opcodes (on x86 CPUs).
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 pub mod mq_avx2;
 
 // Re-export RNG traits to get a smooth dependency management.
-pub use rand_core::{CryptoRng, RngCore, Error as RngError};
+pub use rand_core::{CryptoRng, Error as RngError, RngCore};
 
 /// Symbolic constant for FN-DSA with degree 512 (`logn = 9`).
 pub const FN_DSA_LOGN_512: u32 = 9;
@@ -59,9 +61,12 @@ pub const fn signature_size(logn: u32) -> usize {
     //   8    256     356
     //   9    512     666
     //  10   1024    1280
-    44 + 3 * (256 >> (10 - logn)) + 2 * (128 >> (10 - logn))
-        + 3 * (64 >> (10 - logn)) + 2 * (16 >> (10 - logn))
-        - 2 * (2 >> (10 - logn)) - 8 * (1 >> (10 - logn))
+    44 + 3 * (256 >> (10 - logn))
+        + 2 * (128 >> (10 - logn))
+        + 3 * (64 >> (10 - logn))
+        + 2 * (16 >> (10 - logn))
+        - 2 * (2 >> (10 - logn))
+        - 8 * (1 >> (10 - logn))
 }
 
 /// The message for which a signature is to be generated or verified is
@@ -94,40 +99,49 @@ pub const HASH_ID_RAW: HashIdentifier = HashIdentifier(&[0x00]);
 pub const HASH_ID_ORIGINAL_FALCON: HashIdentifier = HashIdentifier(&[0xFF]);
 
 /// Hash function identifier: SHA-256
-pub const HASH_ID_SHA256: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01]);
+pub const HASH_ID_SHA256: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
+]);
 
 /// Hash function identifier: SHA-384
-pub const HASH_ID_SHA384: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02]);
+pub const HASH_ID_SHA384: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02,
+]);
 
 /// Hash function identifier: SHA-512
-pub const HASH_ID_SHA512: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03]);
+pub const HASH_ID_SHA512: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03,
+]);
 
 /// Hash function identifier: SHA-512-256
-pub const HASH_ID_SHA512_256: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x06]);
+pub const HASH_ID_SHA512_256: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x06,
+]);
 
 /// Hash function identifier: SHA3-256
-pub const HASH_ID_SHA3_256: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x08]);
+pub const HASH_ID_SHA3_256: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x08,
+]);
 
 /// Hash function identifier: SHA3-384
-pub const HASH_ID_SHA3_384: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x09]);
+pub const HASH_ID_SHA3_384: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x09,
+]);
 
 /// Hash function identifier: SHA3-512
-pub const HASH_ID_SHA3_512: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0A]);
+pub const HASH_ID_SHA3_512: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0A,
+]);
 
 /// Hash function identifier: SHAKE128
-pub const HASH_ID_SHAKE128: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0B]);
+pub const HASH_ID_SHAKE128: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0B,
+]);
 
 /// Hash function identifier: SHAKE256
-pub const HASH_ID_SHAKE256: HashIdentifier = HashIdentifier(
-    &[0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0C]);
+pub const HASH_ID_SHAKE256: HashIdentifier = HashIdentifier(&[
+    0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0C,
+]);
 
 /// When a message is signed or verified, it is accompanied with a domain
 /// separation context, which is an arbitrary sequence of bytes of length
@@ -151,9 +165,14 @@ pub const DOMAIN_NONE: DomainContext = DomainContext(b"");
 /// If `id` is `HASH_ID_RAW`, then no-prehashing is applied and the message
 /// itself should be provided as `hv`. Otherwise, the caller is responsible
 /// for applying the pre-hashing, and `hv` shall be the hashed message.
-pub fn hash_to_point(nonce: &[u8], hashed_vrfy_key: &[u8],
-    ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], c: &mut [u16])
-{
+pub fn hash_to_point(
+    nonce: &[u8],
+    hashed_vrfy_key: &[u8],
+    ctx: &DomainContext,
+    id: &HashIdentifier,
+    hv: &[u8],
+    c: &mut [u16],
+) {
     // TODO: remove support for original Falcon when the final FN-DSA
     // is defined and has test vectors. Since the message is used "as is",
     // this encoding can mimic all others, and thus bypasses any attempt at
@@ -226,16 +245,20 @@ pub trait PRNG: Copy + Clone {
     fn next_u64(&mut self) -> u64;
 }
 
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 cpufeatures::new!(cpuid_avx2, "avx2");
 
 /// Do a rutime check for AVX2 support (x86 and x86_64 only).
 ///
 /// This is a specialized subcase of the is_x86_feature_detected macro,
 /// except that this function is compatible with `no_std` builds.
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 pub fn has_avx2() -> bool {
     cpuid_avx2::get()
 }

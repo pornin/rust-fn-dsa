@@ -2,9 +2,9 @@ name: Rust
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,7 +16,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Check formatting
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        override: true
+        components: clippy, rustfmt
+    - name: Check fmt
       run: cargo fmt -- --check
     - name: Build
       run: cargo build --verbose

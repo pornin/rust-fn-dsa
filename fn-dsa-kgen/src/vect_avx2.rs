@@ -1,18 +1,18 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
-use super::fxp::{FXR, FXC, GM_TAB};
+use super::fxp::{FXC, FXR, GM_TAB};
 
-#[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
 
 use core::mem::transmute;
 
-// ======================================================================== 
+// ========================================================================
 // Fixed-point vector operations (with AVX2 optimizations)
-// ======================================================================== 
+// ========================================================================
 
 // ------------------------------------------------------------------------
 // Parallel operations on FXR values (x4).
@@ -28,14 +28,16 @@ unsafe fn fxr_mul_x4(ya: __m256i, yb: __m256i) -> __m256i {
     let y4 = _mm256_mul_epu32(ya_hi, yb_hi);
     let y1 = _mm256_srli_epi64(y1, 32);
     let y4 = _mm256_slli_epi64(y4, 32);
-    let y5 = _mm256_add_epi64(
-        _mm256_add_epi64(y1, y2),
-        _mm256_add_epi64(y3, y4));
+    let y5 = _mm256_add_epi64(_mm256_add_epi64(y1, y2), _mm256_add_epi64(y3, y4));
     let yna = _mm256_srai_epi32(ya, 31);
     let ynb = _mm256_srai_epi32(yb, 31);
-    _mm256_sub_epi64(y5, _mm256_add_epi64(
-        _mm256_and_si256(_mm256_slli_epi64(yb, 32), yna),
-        _mm256_and_si256(_mm256_slli_epi64(ya, 32), ynb)))
+    _mm256_sub_epi64(
+        y5,
+        _mm256_add_epi64(
+            _mm256_and_si256(_mm256_slli_epi64(yb, 32), yna),
+            _mm256_and_si256(_mm256_slli_epi64(ya, 32), ynb),
+        ),
+    )
 }
 
 #[target_feature(enable = "avx2")]
@@ -49,9 +51,10 @@ unsafe fn fxr_sqr_x4(ya: __m256i) -> __m256i {
     let y2 = _mm256_add_epi64(y2, y2);
     let y3 = _mm256_slli_epi64(y3, 32);
     let y4 = _mm256_add_epi64(_mm256_add_epi64(y1, y2), y3);
-    _mm256_sub_epi64(y4,
-        _mm256_and_si256(_mm256_slli_epi64(ya, 33),
-        _mm256_srai_epi32(ya, 31)))
+    _mm256_sub_epi64(
+        y4,
+        _mm256_and_si256(_mm256_slli_epi64(ya, 33), _mm256_srai_epi32(ya, 31)),
+    )
 }
 
 #[target_feature(enable = "avx2")]
@@ -60,9 +63,7 @@ unsafe fn fxr_half_x4(ya: __m256i) -> __m256i {
     let y1 = _mm256_set1_epi64x(1);
     let yh = _mm256_set1_epi64x((1u64 << 63) as i64);
     let ya = _mm256_add_epi64(ya, y1);
-    _mm256_or_si256(
-        _mm256_srli_epi64(ya, 1),
-        _mm256_and_si256(ya, yh))
+    _mm256_or_si256(_mm256_srli_epi64(ya, 1), _mm256_and_si256(ya, yh))
 }
 
 #[target_feature(enable = "avx2")]
@@ -70,10 +71,8 @@ unsafe fn fxr_half_x4(ya: __m256i) -> __m256i {
 pub(crate) unsafe fn fxr_div_x4(yn: __m256i, yd: __m256i) -> __m256i {
     // Get absolute values and signs. From now on, we can suppose
     // that n and d fit on 63 bits (we ignore edge conditions).
-    let ysn = _mm256_sub_epi64(_mm256_setzero_si256(),
-        _mm256_srli_epi64(yn, 63));
-    let ysd = _mm256_sub_epi64(_mm256_setzero_si256(),
-        _mm256_srli_epi64(yd, 63));
+    let ysn = _mm256_sub_epi64(_mm256_setzero_si256(), _mm256_srli_epi64(yn, 63));
+    let ysd = _mm256_sub_epi64(_mm256_setzero_si256(), _mm256_srli_epi64(yd, 63));
     let mut yn = _mm256_sub_epi64(_mm256_xor_si256(yn, ysn), ysn);
     let yd = _mm256_sub_epi64(_mm256_xor_si256(yd, ysd), ysd);
 
@@ -90,8 +89,7 @@ pub(crate) unsafe fn fxr_div_x4(yn: __m256i, yd: __m256i) -> __m256i {
         yq = _mm256_sub_epi64(yq, yc);
         ynum = _mm256_sub_epi64(ynum, _mm256_and_si256(yc, yd));
         ynum = _mm256_add_epi64(ynum, ynum);
-        ynum = _mm256_or_si256(ynum,
-            _mm256_and_si256(_mm256_srli_epi64(yn, 30), y1));
+        ynum = _mm256_or_si256(ynum, _mm256_and_si256(_mm256_srli_epi64(yn, 30), y1));
         yn = _mm256_add_epi64(yn, yn);
     }
     // bits 32 to 0
@@ -122,14 +120,18 @@ pub(crate) unsafe fn fxr_div_x4(yn: __m256i, yd: __m256i) -> __m256i {
 
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn fxc_mul_x4(ya_re: __m256i, ya_im: __m256i,
-    yb_re: __m256i, yb_im: __m256i) -> (__m256i, __m256i)
-{
+unsafe fn fxc_mul_x4(
+    ya_re: __m256i,
+    ya_im: __m256i,
+    yb_re: __m256i,
+    yb_im: __m256i,
+) -> (__m256i, __m256i) {
     let y0 = fxr_mul_x4(ya_re, yb_re);
     let y1 = fxr_mul_x4(ya_im, yb_im);
     let y2 = fxr_mul_x4(
         _mm256_add_epi64(ya_re, ya_im),
-        _mm256_add_epi64(yb_re, yb_im));
+        _mm256_add_epi64(yb_re, yb_im),
+    );
     let yd_re = _mm256_sub_epi64(y0, y1);
     let yd_im = _mm256_sub_epi64(y2, _mm256_add_epi64(y0, y1));
     (yd_re, yd_im)
@@ -137,10 +139,13 @@ unsafe fn fxc_mul_x4(ya_re: __m256i, ya_im: __m256i,
 
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn FFT4(yv0_re: __m256i, yv1_re: __m256i,
-    yv0_im: __m256i, yv1_im: __m256i, k: usize)
-    -> (__m256i, __m256i, __m256i, __m256i)
-{
+unsafe fn FFT4(
+    yv0_re: __m256i,
+    yv1_re: __m256i,
+    yv0_im: __m256i,
+    yv1_im: __m256i,
+    k: usize,
+) -> (__m256i, __m256i, __m256i, __m256i) {
     // yv0: 0:1:2:3
     // yv1: 4:5:6:7
     // combine 0/2 and 1/3 with gm[k+0]
@@ -183,12 +188,14 @@ unsafe fn FFT4(yv0_re: __m256i, yv1_re: __m256i,
         GM_TAB[(k << 1) + 0].re.0 as i64,
         GM_TAB[(k << 1) + 1].re.0 as i64,
         GM_TAB[(k << 1) + 2].re.0 as i64,
-        GM_TAB[(k << 1) + 3].re.0 as i64);
+        GM_TAB[(k << 1) + 3].re.0 as i64,
+    );
     let yg1_im = _mm256_setr_epi64x(
         GM_TAB[(k << 1) + 0].im.0 as i64,
         GM_TAB[(k << 1) + 1].im.0 as i64,
         GM_TAB[(k << 1) + 2].im.0 as i64,
-        GM_TAB[(k << 1) + 3].im.0 as i64);
+        GM_TAB[(k << 1) + 3].im.0 as i64,
+    );
 
     let (yt1_re, yt1_im) = fxc_mul_x4(yt1_re, yt1_im, yg1_re, yg1_im);
 
@@ -278,8 +285,14 @@ pub(crate) unsafe fn vect_FFT(logn: u32, f: &mut [FXR]) {
             for i in 0..(m >> 1) {
                 let s = GM_TAB[m + i];
                 for j in j0..(j0 + ht) {
-                    let x = FXC { re: f[j], im: f[j + hn] };
-                    let y = FXC { re: f[j + ht], im: f[j + ht + hn] };
+                    let x = FXC {
+                        re: f[j],
+                        im: f[j + hn],
+                    };
+                    let y = FXC {
+                        re: f[j + ht],
+                        im: f[j + ht + hn],
+                    };
                     let z = s * y;
                     let w1 = x + z;
                     f[j] = w1.re;
@@ -297,10 +310,13 @@ pub(crate) unsafe fn vect_FFT(logn: u32, f: &mut [FXR]) {
 
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn iFFT4(yv0_re: __m256i, yv1_re: __m256i,
-    yv0_im: __m256i, yv1_im: __m256i, k: usize)
-    -> (__m256i, __m256i, __m256i, __m256i)
-{
+unsafe fn iFFT4(
+    yv0_re: __m256i,
+    yv1_re: __m256i,
+    yv0_im: __m256i,
+    yv1_im: __m256i,
+    k: usize,
+) -> (__m256i, __m256i, __m256i, __m256i) {
     // v0: 0:1:2:3
     // v1: 4:5:6:7
     // combine 0/1 with gm[2*k+0], 2/3 with gm[2*k+1]
@@ -318,12 +334,14 @@ unsafe fn iFFT4(yv0_re: __m256i, yv1_re: __m256i,
         GM_TAB[(k << 1) + 0].re.0 as i64,
         GM_TAB[(k << 1) + 2].re.0 as i64,
         GM_TAB[(k << 1) + 1].re.0 as i64,
-        GM_TAB[(k << 1) + 3].re.0 as i64);
+        GM_TAB[(k << 1) + 3].re.0 as i64,
+    );
     let yg1_im = _mm256_setr_epi64x(
         GM_TAB[(k << 1) + 0].im.0 as i64,
         GM_TAB[(k << 1) + 2].im.0 as i64,
         GM_TAB[(k << 1) + 1].im.0 as i64,
-        GM_TAB[(k << 1) + 3].im.0 as i64);
+        GM_TAB[(k << 1) + 3].im.0 as i64,
+    );
     let yg1_im = _mm256_sub_epi64(_mm256_setzero_si256(), yg1_im);
 
     let yv0_re = fxr_half_x4(_mm256_add_epi64(yt0_re, yt1_re));
@@ -470,8 +488,14 @@ pub(crate) unsafe fn vect_iFFT(logn: u32, f: &mut [FXR]) {
             for i in 0..(m >> 1) {
                 let s = GM_TAB[m + i].conj();
                 for j in j0..(j0 + ht) {
-                    let x = FXC { re: f[j], im: f[j + hn] };
-                    let y = FXC { re: f[j + ht], im: f[j + ht + hn] };
+                    let x = FXC {
+                        re: f[j],
+                        im: f[j + hn],
+                    };
+                    let y = FXC {
+                        re: f[j + ht],
+                        im: f[j + ht + hn],
+                    };
                     let z1 = (x + y).half();
                     f[j] = z1.re;
                     f[j + hn] = z1.im;
@@ -590,8 +614,14 @@ pub(crate) unsafe fn vect_mul_fft(logn: u32, a: &mut [FXR], b: &[FXR]) {
     } else {
         let hn = 1usize << (logn - 1);
         for i in 0..hn {
-            let x = FXC { re: a[i], im: a[i + hn] };
-            let y = FXC { re: b[i], im: b[i + hn] };
+            let x = FXC {
+                re: a[i],
+                im: a[i + hn],
+            };
+            let y = FXC {
+                re: b[i],
+                im: b[i + hn],
+            };
             let z = x * y;
             a[i] = z.re;
             a[i + hn] = z.im;
@@ -682,9 +712,7 @@ pub(crate) unsafe fn vect_div_selfadj_fft(logn: u32, a: &mut [FXR], b: &[FXR]) {
 // Since d is self-adjoint, it is half-size (only the low half is set, the
 // high half is implicitly zero).
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn vect_norm_fft(logn: u32,
-    d: &mut [FXR], a: &[FXR], b: &[FXR])
-{
+pub(crate) unsafe fn vect_norm_fft(logn: u32, d: &mut [FXR], a: &[FXR], b: &[FXR]) {
     if logn >= 3 {
         let dp: *mut __m256i = transmute(d.as_mut_ptr());
         let ap: *const __m256i = transmute(a.as_ptr());
@@ -699,9 +727,7 @@ pub(crate) unsafe fn vect_norm_fft(logn: u32,
             let y1 = fxr_sqr_x4(ya_im);
             let y2 = fxr_sqr_x4(yb_re);
             let y3 = fxr_sqr_x4(yb_im);
-            let yd = _mm256_add_epi64(
-                _mm256_add_epi64(y0, y1),
-                _mm256_add_epi64(y2, y3));
+            let yd = _mm256_add_epi64(_mm256_add_epi64(y0, y1), _mm256_add_epi64(y2, y3));
             _mm256_storeu_si256(dp.wrapping_add(i), yd);
         }
     } else {
@@ -716,9 +742,7 @@ pub(crate) unsafe fn vect_norm_fft(logn: u32,
 // representation. Since d is self-adjoint, it is half-size (only the
 // low half is set, the high half is implicitly zero).
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn vect_invnorm_fft(logn: u32, d: &mut [FXR],
-    a: &[FXR], b: &[FXR], e: u32)
-{
+pub(crate) unsafe fn vect_invnorm_fft(logn: u32, d: &mut [FXR], a: &[FXR], b: &[FXR], e: u32) {
     if logn >= 3 {
         let dp: *mut __m256i = transmute(d.as_mut_ptr());
         let ap: *const __m256i = transmute(a.as_ptr());
@@ -735,9 +759,7 @@ pub(crate) unsafe fn vect_invnorm_fft(logn: u32, d: &mut [FXR],
             let y1 = fxr_sqr_x4(ya_im);
             let y2 = fxr_sqr_x4(yb_re);
             let y3 = fxr_sqr_x4(yb_im);
-            let yd = _mm256_add_epi64(
-                _mm256_add_epi64(y0, y1),
-                _mm256_add_epi64(y2, y3));
+            let yd = _mm256_add_epi64(_mm256_add_epi64(y0, y1), _mm256_add_epi64(y2, y3));
             let yd = fxr_div_x4(yfe, yd);
             _mm256_storeu_si256(dp.wrapping_add(i), yd);
         }
@@ -757,7 +779,7 @@ pub(crate) unsafe fn vect_invnorm_fft(logn: u32, d: &mut [FXR],
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     fn rndvect(logn: u32, f: &mut [FXR], seed: u64) {
         let mut sh = Sha256::new();
@@ -801,10 +823,8 @@ mod tests {
                 for logn in 1u32..10u32 {
                     let n = 1usize << logn;
                     for i in 0u32..10u32 {
-                        rndvect(logn, &mut a,
-                            (0 | (logn << 8) | (i << 12)) as u64);
-                        rndvect(logn, &mut b,
-                            (1 | (logn << 8) | (i << 12)) as u64);
+                        rndvect(logn, &mut a, (0 | (logn << 8) | (i << 12)) as u64);
+                        rndvect(logn, &mut b, (1 | (logn << 8) | (i << 12)) as u64);
                         c[..n].copy_from_slice(&a[..n]);
                         let mut c2 = c;
                         vect_FFT(logn, &mut c);
@@ -834,8 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fxr_x4()
-    {
+    fn test_fxr_x4() {
         if fn_dsa_comm::has_avx2() {
             unsafe {
                 let mut sh = Sha256::new();
@@ -846,14 +865,16 @@ mod tests {
                     sh.update((2 * i + 0).to_le_bytes());
                     buf[..].copy_from_slice(&sh.finalize_reset());
                     for j in 0..4 {
-                        f[j] = FXR(u64::from_le_bytes(*<&[u8; 8]>::try_from(
-                            &buf[8 * j..8 * j + 8]).unwrap()));
+                        f[j] = FXR(u64::from_le_bytes(
+                            *<&[u8; 8]>::try_from(&buf[8 * j..8 * j + 8]).unwrap(),
+                        ));
                     }
                     sh.update((2 * i + 1).to_le_bytes());
                     buf[..].copy_from_slice(&sh.finalize_reset());
                     for j in 0..4 {
-                        g[j] = FXR(u64::from_le_bytes(*<&[u8; 8]>::try_from(
-                            &buf[8 * j..8 * j + 8]).unwrap()));
+                        g[j] = FXR(u64::from_le_bytes(
+                            *<&[u8; 8]>::try_from(&buf[8 * j..8 * j + 8]).unwrap(),
+                        ));
                     }
 
                     let mut h = [FXR::ZERO; 4];

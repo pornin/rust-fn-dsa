@@ -47,7 +47,7 @@
 //!     VerifyingKey, VerifyingKeyStandard,
 //!     DOMAIN_NONE, HASH_ID_RAW
 //! };
-//! 
+//!
 //! match VerifyingKeyStandard::decode(encoded_verifying_key) {
 //!     Some(vk) => {
 //!         if vk.verify(sig, &DOMAIN_NONE, &HASH_ID_RAW, b"message") {
@@ -62,31 +62,18 @@
 //! }
 //! ```
 
-use fn_dsa_comm::{codec, mq, hash_to_point, shake};
+use fn_dsa_comm::{codec, hash_to_point, mq, shake};
 
 // Re-export useful types, constants and functions.
 pub use fn_dsa_comm::{
-    vrfy_key_size, signature_size,
-    FN_DSA_LOGN_512, FN_DSA_LOGN_1024,
-    HashIdentifier,
-    HASH_ID_RAW,
-    HASH_ID_ORIGINAL_FALCON,
-    HASH_ID_SHA256,
-    HASH_ID_SHA384,
-    HASH_ID_SHA512,
-    HASH_ID_SHA512_256,
-    HASH_ID_SHA3_256,
-    HASH_ID_SHA3_384,
-    HASH_ID_SHA3_512,
-    HASH_ID_SHAKE128,
-    HASH_ID_SHAKE256,
-    DomainContext,
-    DOMAIN_NONE,
+    signature_size, vrfy_key_size, DomainContext, HashIdentifier, DOMAIN_NONE, FN_DSA_LOGN_1024,
+    FN_DSA_LOGN_512, HASH_ID_ORIGINAL_FALCON, HASH_ID_RAW, HASH_ID_SHA256, HASH_ID_SHA384,
+    HASH_ID_SHA3_256, HASH_ID_SHA3_384, HASH_ID_SHA3_512, HASH_ID_SHA512, HASH_ID_SHA512_256,
+    HASH_ID_SHAKE128, HASH_ID_SHAKE256,
 };
 
 /// Verifying key handler.
 pub trait VerifyingKey: Sized {
-
     /// Create the instance by decoding the verifying key from its storage
     /// format.
     ///
@@ -109,83 +96,113 @@ pub trait VerifyingKey: Sized {
     /// Return value is `true` if the signature is valid, `false` otherwise.
     /// Signature decoding errors and degree mismatch with the verifying key
     /// also lead to `false` being returned.
-    fn verify(&self, sig: &[u8],
-        ctx: &DomainContext, id: &HashIdentifier, hv: &[u8]) -> bool;
+    fn verify(&self, sig: &[u8], ctx: &DomainContext, id: &HashIdentifier, hv: &[u8]) -> bool;
 }
 
 macro_rules! vrfy_key_impl {
-    ($typename:ident, $logn_min:expr, $logn_max:expr) =>
-{
-    #[doc = concat!("Signature verifier for degrees (`logn`) ",
-        stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
-    #[derive(Copy, Clone, Debug)]
-    pub struct $typename {
-        logn: u32,
-        h: [u16; 1 << ($logn_max)],
-        hashed_key: [u8; 64],
+    ($typename:ident, $logn_min:expr, $logn_max:expr) => {
+        #[doc = concat!("Signature verifier for degrees (`logn`) ",
+                                stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
+        #[derive(Copy, Clone, Debug)]
+        pub struct $typename {
+            logn: u32,
+            h: [u16; 1 << ($logn_max)],
+            hashed_key: [u8; 64],
 
-        #[cfg(all(not(feature = "no_avx2"),
-            any(target_arch = "x86_64", target_arch = "x86")))]
-        use_avx2: bool,
-    }
+            #[cfg(all(
+                not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")
+            ))]
+            use_avx2: bool,
+        }
 
-    impl VerifyingKey for $typename {
+        impl VerifyingKey for $typename {
+            fn decode(src: &[u8]) -> Option<Self> {
+                let mut h = [0u16; 1 << ($logn_max)];
+                let mut hashed_key = [0u8; 64];
+                let mut sh = shake::SHAKE256::new();
+                sh.inject(src);
+                sh.flip();
+                sh.extract(&mut hashed_key);
 
-        fn decode(src: &[u8]) -> Option<Self> {
-            let mut h = [0u16; 1 << ($logn_max)];
-            let mut hashed_key = [0u8; 64];
-            let mut sh = shake::SHAKE256::new();
-            sh.inject(src);
-            sh.flip();
-            sh.extract(&mut hashed_key);
-
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
-            {
-                if fn_dsa_comm::has_avx2() {
-                    unsafe {
-                        let logn = decode_avx2_inner(
-                            $logn_min, $logn_max, &mut h[..], src)?;
-                        return Some(
-                            Self { logn, h, hashed_key, use_avx2: true });
+                #[cfg(all(
+                    not(feature = "no_avx2"),
+                    any(target_arch = "x86_64", target_arch = "x86")
+                ))]
+                {
+                    if fn_dsa_comm::has_avx2() {
+                        unsafe {
+                            let logn = decode_avx2_inner($logn_min, $logn_max, &mut h[..], src)?;
+                            return Some(Self {
+                                logn,
+                                h,
+                                hashed_key,
+                                use_avx2: true,
+                            });
+                        }
                     }
                 }
+
+                let logn = decode_inner($logn_min, $logn_max, &mut h[..], src)?;
+                Some(Self {
+                    logn,
+                    h,
+                    hashed_key,
+                    #[cfg(all(
+                        not(feature = "no_avx2"),
+                        any(target_arch = "x86_64", target_arch = "x86")
+                    ))]
+                    use_avx2: false,
+                })
             }
 
-            let logn = decode_inner($logn_min, $logn_max, &mut h[..], src)?;
-            Some(Self {
-                logn, h, hashed_key,
-                #[cfg(all(not(feature = "no_avx2"),
-                    any(target_arch = "x86_64", target_arch = "x86")))]
-                use_avx2: false,
-            })
-        }
+            fn verify(
+                &self,
+                sig: &[u8],
+                ctx: &DomainContext,
+                id: &HashIdentifier,
+                hv: &[u8],
+            ) -> bool {
+                let logn = self.logn;
+                let n = 1usize << logn;
+                let mut tmp_i16 = [0i16; 1 << ($logn_max)];
+                let mut tmp_u16 = [0u16; 2 << ($logn_max)];
 
-        fn verify(&self, sig: &[u8],
-            ctx: &DomainContext, id: &HashIdentifier, hv: &[u8]) -> bool
-        {
-            let logn = self.logn;
-            let n = 1usize << logn;
-            let mut tmp_i16 = [0i16; 1 << ($logn_max)];
-            let mut tmp_u16 = [0u16; 2 << ($logn_max)];
-
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
-            if self.use_avx2 {
-                unsafe {
-                    return verify_avx2_inner(logn,
-                        &self.h[..n], &self.hashed_key, sig, ctx, id, hv,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]);
+                #[cfg(all(
+                    not(feature = "no_avx2"),
+                    any(target_arch = "x86_64", target_arch = "x86")
+                ))]
+                if self.use_avx2 {
+                    unsafe {
+                        return verify_avx2_inner(
+                            logn,
+                            &self.h[..n],
+                            &self.hashed_key,
+                            sig,
+                            ctx,
+                            id,
+                            hv,
+                            &mut tmp_i16[..n],
+                            &mut tmp_u16[..(2 * n)],
+                        );
+                    }
                 }
+
+                verify_inner(
+                    logn,
+                    &self.h[..n],
+                    &self.hashed_key,
+                    sig,
+                    ctx,
+                    id,
+                    hv,
+                    &mut tmp_i16[..n],
+                    &mut tmp_u16[..(2 * n)],
+                )
             }
-
-            verify_inner(logn,
-                &self.h[..n], &self.hashed_key, sig, ctx, id, hv,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)])
         }
-    }
-
-} }
+    };
+}
 
 // A VerifyingKey type that supports the standard degrees (512 and 1024).
 vrfy_key_impl!(VerifyingKeyStandard, 9, 10);
@@ -207,9 +224,7 @@ vrfy_key_impl!(VerifyingKeyWeak, 2, 8);
 //   h          destination buffer for key coefficients
 //   src        encoded key
 // Returns None on error, or Some(logn) on success.
-fn decode_inner(logn_min: u32, logn_max: u32, h: &mut [u16], src: &[u8])
-    -> Option<u32>
-{
+fn decode_inner(logn_min: u32, logn_max: u32, h: &mut [u16], src: &[u8]) -> Option<u32> {
     if src.len() == 0 {
         return None;
     }
@@ -231,10 +246,17 @@ fn decode_inner(logn_min: u32, logn_max: u32, h: &mut [u16], src: &[u8])
     Some(logn)
 }
 
-fn verify_inner(logn: u32, h: &[u16], hashed_key: &[u8],
-    sig: &[u8], ctx: &DomainContext, id: &HashIdentifier, hv: &[u8],
-    tmp_i16: &mut [i16], tmp_u16: &mut [u16]) -> bool
-{
+fn verify_inner(
+    logn: u32,
+    h: &[u16],
+    hashed_key: &[u8],
+    sig: &[u8],
+    ctx: &DomainContext,
+    id: &HashIdentifier,
+    hv: &[u8],
+    tmp_i16: &mut [i16],
+    tmp_u16: &mut [u16],
+) -> bool {
     // Get some temporary buffers of length n elements.
     // s2i is signed, t1 and t2 are unsigned.
     let n = 1usize << logn;
@@ -283,12 +305,17 @@ fn verify_inner(logn: u32, h: &[u16], hashed_key: &[u8],
 }
 
 // AVX2-optimized implementation of key decoding.
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 #[target_feature(enable = "avx2")]
-unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
-    h: &mut [u16], src: &[u8]) -> Option<u32>
-{
+unsafe fn decode_avx2_inner(
+    logn_min: u32,
+    logn_max: u32,
+    h: &mut [u16],
+    src: &[u8],
+) -> Option<u32> {
     use fn_dsa_comm::mq_avx2;
 
     if src.len() == 0 {
@@ -313,13 +340,22 @@ unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
 }
 
 // AVX2-optimized implementation of verification.
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 #[target_feature(enable = "avx2")]
-unsafe fn verify_avx2_inner(logn: u32, h: &[u16], hashed_key: &[u8],
-    sig: &[u8], ctx: &DomainContext, id: &HashIdentifier, hv: &[u8],
-    tmp_i16: &mut [i16], tmp_u16: &mut [u16]) -> bool
-{
+unsafe fn verify_avx2_inner(
+    logn: u32,
+    h: &[u16],
+    hashed_key: &[u8],
+    sig: &[u8],
+    ctx: &DomainContext,
+    id: &HashIdentifier,
+    hv: &[u8],
+    tmp_i16: &mut [i16],
+    tmp_u16: &mut [u16],
+) -> bool {
     use fn_dsa_comm::mq_avx2;
 
     // Get some temporary buffers of length n elements.
@@ -366,8 +402,7 @@ unsafe fn verify_avx2_inner(logn: u32, h: &[u16], hashed_key: &[u8],
 
     // Signature is valid if the total squared norm of (s1,s2) is small
     // enough. We must take care of not overflowing.
-    norm1 < norm2.wrapping_neg()
-        && (norm1 + norm2) <= mq_avx2::SQBETA[logn as usize]
+    norm1 < norm2.wrapping_neg() && (norm1 + norm2) <= mq_avx2::SQBETA[logn as usize]
 }
 
 #[cfg(test)]
@@ -392,15 +427,12 @@ mod tests {
             let mut e_sig = hex::decode(kat[3 * i + 2]).unwrap();
 
             let vk = VerifyingKeyStandard::decode(&e_pub).unwrap();
-            assert!(vk.verify(&e_sig,
-                &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
+            assert!(vk.verify(&e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
             e_msg[0] ^= 0x01;
-            assert!(!vk.verify(&e_sig,
-                &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
+            assert!(!vk.verify(&e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
             e_msg[0] ^= 0x01;
             e_sig[50] ^= 0x01;
-            assert!(!vk.verify(&e_sig,
-                &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
+            assert!(!vk.verify(&e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
             e_sig[50] ^= 0x01;
 
             // Also check the inner function(s).
@@ -408,35 +440,85 @@ mod tests {
             let n = 1usize << logn;
             let mut tmp_i16 = [0i16; 1 << 10];
             let mut tmp_u16 = [0u16; 2 << 10];
-            assert!(verify_inner(logn, &vk.h[..n], &vk.hashed_key,
-                &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+            assert!(verify_inner(
+                logn,
+                &vk.h[..n],
+                &vk.hashed_key,
+                &e_sig,
+                &DOMAIN_NONE,
+                &HASH_ID_ORIGINAL_FALCON,
+                &e_msg,
+                &mut tmp_i16[..n],
+                &mut tmp_u16[..(2 * n)]
+            ));
             e_msg[0] ^= 0x01;
-            assert!(!verify_inner(logn, &vk.h[..n], &vk.hashed_key,
-                &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+            assert!(!verify_inner(
+                logn,
+                &vk.h[..n],
+                &vk.hashed_key,
+                &e_sig,
+                &DOMAIN_NONE,
+                &HASH_ID_ORIGINAL_FALCON,
+                &e_msg,
+                &mut tmp_i16[..n],
+                &mut tmp_u16[..(2 * n)]
+            ));
             e_msg[0] ^= 0x01;
             e_sig[50] ^= 0x01;
-            assert!(!verify_inner(logn, &vk.h[..n], &vk.hashed_key,
-                &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+            assert!(!verify_inner(
+                logn,
+                &vk.h[..n],
+                &vk.hashed_key,
+                &e_sig,
+                &DOMAIN_NONE,
+                &HASH_ID_ORIGINAL_FALCON,
+                &e_msg,
+                &mut tmp_i16[..n],
+                &mut tmp_u16[..(2 * n)]
+            ));
             e_sig[50] ^= 0x01;
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
+            #[cfg(all(
+                not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")
+            ))]
             if fn_dsa_comm::has_avx2() {
                 unsafe {
-                    assert!(verify_avx2_inner(logn, &vk.h[..n], &vk.hashed_key,
-                        &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+                    assert!(verify_avx2_inner(
+                        logn,
+                        &vk.h[..n],
+                        &vk.hashed_key,
+                        &e_sig,
+                        &DOMAIN_NONE,
+                        &HASH_ID_ORIGINAL_FALCON,
+                        &e_msg,
+                        &mut tmp_i16[..n],
+                        &mut tmp_u16[..(2 * n)]
+                    ));
                     e_msg[0] ^= 0x01;
-                    assert!(!verify_avx2_inner(logn, &vk.h[..n], &vk.hashed_key,
-                        &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+                    assert!(!verify_avx2_inner(
+                        logn,
+                        &vk.h[..n],
+                        &vk.hashed_key,
+                        &e_sig,
+                        &DOMAIN_NONE,
+                        &HASH_ID_ORIGINAL_FALCON,
+                        &e_msg,
+                        &mut tmp_i16[..n],
+                        &mut tmp_u16[..(2 * n)]
+                    ));
                     e_msg[0] ^= 0x01;
                     e_sig[50] ^= 0x01;
-                    assert!(!verify_avx2_inner(logn, &vk.h[..n], &vk.hashed_key,
-                        &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+                    assert!(!verify_avx2_inner(
+                        logn,
+                        &vk.h[..n],
+                        &vk.hashed_key,
+                        &e_sig,
+                        &DOMAIN_NONE,
+                        &HASH_ID_ORIGINAL_FALCON,
+                        &e_msg,
+                        &mut tmp_i16[..n],
+                        &mut tmp_u16[..(2 * n)]
+                    ));
                     e_sig[50] ^= 0x01;
                 }
             }
@@ -445,7 +527,6 @@ mod tests {
 
     const KAT_ORIG_512: [&str; 15] = [
         // Each triplet is: public key, message, signature.
-
         concat!(
             "091164798255c8c721e8aa5a4ae3ab9ad824d9f98a81724d26517cd6d2354ceb",
             "51b30a006d40ab3bb8a43f4b50b74000d9b098d0a903291c9eb172b994e1e7af",
@@ -475,7 +556,8 @@ mod tests {
             "6a00644ec178363c13a509208f4f8c83e4d5eebf7e3cbb193018b257798c82f8",
             "6dab852e4900aa41091d72f10101cec640281fe3b1618402893d9607aeba2044",
             "ed42a843b88d32e680fc5b849ae193d4a00cc524993d561b8e112441c9332250",
-            "05"),
+            "05"
+        ),
         "dbd71151d7a9b83b0b6e2556ac824225",
         concat!(
             "39d33b744e2ceadc9c9deb583e2d091f65e623e6dfeafbb27b287137d08ace8f",
@@ -498,8 +580,8 @@ mod tests {
             "c690c637bd33581c6a0cd593c12f79c2a320dd71e203c3184ca08fcfcb0d52e9",
             "6b4d9adec31d2f153a1b76d834ce00b9cc9437d91e74382bc7bd0e609aadbd97",
             "75d0eb15af5575c461a55ba52ed12523649f9ff922a37923c99f49cea601c949",
-            "6f9c0e7e33e77085a7fcd839f789a00000000000000000000000"),
-
+            "6f9c0e7e33e77085a7fcd839f789a00000000000000000000000"
+        ),
         concat!(
             "0961988048dfedb9339d9f0675ec3d4a226b5231083949f1cef92f2190bb29d9",
             "5955c8b406859534012fc28cfc7ba3e71b364f9c5774c8256867840036a54491",
@@ -529,7 +611,8 @@ mod tests {
             "5d27dac9219ca855fce1075b530cd2be55fc9f24356ed27682e4f556917230f7",
             "022735183791c0acfe8645fffa64122ca70a9b596341bc8b546ec1ab107e3210",
             "68d370a61c54a57006d3665ab9d48404ba5d44103aff80bad3fb49a2a8833607",
-            "34"),
+            "34"
+        ),
         "739db98759cac439893b6465d6d56186",
         concat!(
             "395d3457743e6a2ef1cb3ded499c2b1b39bf3d21ef3acff157c1f79596f0f917",
@@ -552,8 +635,8 @@ mod tests {
             "bba08b042da7779385034f0867f9ac54888a318f1234c16d5db4b9bf9184c1cd",
             "d74abdd64d82df097528ff0867e78651ad3733968233b94c2acfe2eaf698ca24",
             "b5e34170ec2c6ad5996b5204fab5c1eff5601d867d5984394e0ac504f5a22df3",
-            "6d9ba8583f5e47aebf2a665a2bbc1e0000000000000000000000"),
-
+            "6d9ba8583f5e47aebf2a665a2bbc1e0000000000000000000000"
+        ),
         concat!(
             "093b34bd8284577727e0c59a64e03a3405f7b20ce267b6f8a4258d815c677e14",
             "63da82cfb78c8e23a61b9242157e745b019958e6b2f4d307fc9746be36390e69",
@@ -583,7 +666,8 @@ mod tests {
             "f11300d960b2b84e8524cb5c7a5a4082e838a24c874509853e998858216093fe",
             "83080fadc3c250deaa308836b4a0df6686758df81388733bc5e5984085204374",
             "e884a58cb787322569f6dc0b7974c8347114b3b87a52351815ff972477f72ee7",
-            "dc"),
+            "dc"
+        ),
         "3e1e8bb76a711ebe49620d0b9f5ed233",
         concat!(
             "398f5641ac1f0c367ebf0fde594fd5d99e2abb98e74abd7d9bf7ae50bf8ad9e4",
@@ -606,8 +690,8 @@ mod tests {
             "2b506f520d61cbd9185a45a5e025f8e61bb115321c9554e57e0f55753f867564",
             "683739cd8d362abe546e8faac365bf49d0eb8e750aa62f6dd374c5aafd293a71",
             "52aa90a5bb1a67720d7f17a57eba6ef87c653fcf5352d0881f8a233a4b5a0233",
-            "62c7a3abd5a6a938e1452ce78200000000000000000000000000"),
-
+            "62c7a3abd5a6a938e1452ce78200000000000000000000000000"
+        ),
         concat!(
             "09b4f4e8a3b89489be092b1727647151652bc563e95c1d1e60e9d268b1a711a5",
             "a1a74be6349a7599b0c6eb3a5948250c1d2d41e0ef52145ef83e2affaa006a25",
@@ -637,7 +721,8 @@ mod tests {
             "e117fab4d084711c525b3b666f6a625fe7796a1a79408622d8df893f70d23696",
             "92861ae17a77968cb19e3d1cf6cfab024ba8bd1b57c3e98f1a2b72bac4e34ab4",
             "7ee3c0d1249a09ee836dd8248ad1d513fc258d0e21dc292f0251ad32cf99ef62",
-            "09"),
+            "09"
+        ),
         "72b73d75c0ccb79130be03e8ec9f602a",
         concat!(
             "397aa5c8ee63cdbd64004f85b317c0d3e472cb55a2ae4f53649815d07b13e9ee",
@@ -660,8 +745,8 @@ mod tests {
             "67e034fb15bef8e9e69c4c8d02d489e95dada7dda15f16174cd47c6cf8e5b77f",
             "cf98274f4519582a2f0d06f98e7d791a758f1afb53c7010977e7b826db228f45",
             "c84ceb7c927672578a831497a2dbcdaa06a3f4aad386592faeebb7ce996d981d",
-            "8de40b05012d09aabbdda9503099beec00000000000000000000"),
-
+            "8de40b05012d09aabbdda9503099beec00000000000000000000"
+        ),
         concat!(
             "0994a823d6b7a7881c5091879d43f0396821920e0b4428756caa72d9688070ab",
             "586328e19b00a035189a8d3bc638f50616558c1d6cc7b5001a89dd2041ad1a53",
@@ -691,7 +776,8 @@ mod tests {
             "2893214ce18e43e1b758b8590641e926605d19aeba84216a9597b3a358a872f0",
             "aab9848d1d924563427355fe1704db5a3942aad618da50b394dd40dd257c2438",
             "2136c36be55e45ca5abc90045ec519f8aec0276aa4a47b0dc20eacc98b288250",
-            "86"),
+            "86"
+        ),
         "880abe67dfaa4bf4a9cdd51a369a3374",
         concat!(
             "39101627b19c37ac086baa20094e9860e3b23038bf71d819c0d10f9f4fd6d4a1",
@@ -714,12 +800,12 @@ mod tests {
             "3bb8c332d109a1b821d4af953f7994796b5fc439578063497c3a1378f3a3d68e",
             "133bc2c1637e2f3a3100c0c718e635948239344563c5c4700ebe5fc46fc8c901",
             "a6a7bf6d965a010098407debc7e960663af2fc5e94c8bbcac506a0677429077f",
-            "3ad3909a7d91cecc2c5014ccc5a0000000000000000000000000"),
+            "3ad3909a7d91cecc2c5014ccc5a0000000000000000000000000"
+        ),
     ];
 
     const KAT_ORIG_1024: [&str; 15] = [
         // Each triplet is: public key, message, signature.
-
         concat!(
             "0aab5887ca451b1e5cf5464503dca9b5f44c3a7786a9b1648014f224b4a11648",
             "40584034104513f614af92440417c0086b513a5514d01ccfb4b53d7c583dc90c",
@@ -777,7 +863,8 @@ mod tests {
             "3106e1d2037780b6f488cdc322ae4d46d6c44a713bde0927455c5338808458fb",
             "5eda901939086eca0e16ce43354f42e6baa1c1c5afdc7a0a9e42e27e87d7aad6",
             "6013d01767692a90f785190571316000e8501e3d1e364577a7798b31b061b211",
-            "66"),
+            "66"
+        ),
         "b87670516460a6ea2cc450374b6c1cb6",
         concat!(
             "3a12b43c773f49a7d7ac4c1ca469c72aa64c6a0227bba8bb7b86e48cddc9346d",
@@ -819,8 +906,8 @@ mod tests {
             "f2ec383361a3fb501da93451ba446b9c31fb86d7ef4d96af3732bd4f1f747162",
             "4593a49fd08e6d37854bd4d62a9506da63866634a8982ec8811618d2d04f2b50",
             "84aeefd2f9ffefc99265535960f33bfebad326107646c3a3ce14d69e568d6f53",
-            "56708a26cdf68ef885278b0ca2f5105fb459d800000000000000000000000000"),
-
+            "56708a26cdf68ef885278b0ca2f5105fb459d800000000000000000000000000"
+        ),
         concat!(
             "0a2f5e87e0e89898aa05b1f3a2175488cc05352f4ba760ad56733c16708499b5",
             "698ecca29d089d858f9abf1398c9347aad0891a500d929c61590469250d1860e",
@@ -878,7 +965,8 @@ mod tests {
             "896e5bb69ebb05ed9d890748b3aad165e981855635f141196ae2774d569fa647",
             "0a433dd5d16b9dda0432b4f3c4d6a497624908bafcc767bfcabad6d501a4784a",
             "01b96685537b3a6fc0395c0a56e4d6761cdde5acfc6d478f51b392799ef0704e",
-            "3f"),
+            "3f"
+        ),
         "b03c5bbb3a51e467c36a19f4cc49313c",
         concat!(
             "3a84511e91366f0adba5aa4c496a27dc9d750cedaf5e27499d10cd8f1285f435",
@@ -920,8 +1008,8 @@ mod tests {
             "8a3887abdaf2058b13ef190553e3e9bd6100850df565e3f6b993f2619ccadc8c",
             "edc591260e04cbd6678e240d2b6a19a47d8adcfe190b4b6772816a679264e105",
             "c1a1ac2c2d2ae823a6c90fd827796232ea59675dd833d2dfc19ec7656008252a",
-            "9dad9647f6321fb7230dfbbfe253aa5fe7ff119a69880a3db940000000000000"),
-
+            "9dad9647f6321fb7230dfbbfe253aa5fe7ff119a69880a3db940000000000000"
+        ),
         concat!(
             "0a48ced6450a20ab57dc6041b221a16aba0f1aeec2798011b626774466213578",
             "b670cbfd786aff3afcc90884eed9f43ad6e5529106d568d76d5c1e58e319ada3",
@@ -979,7 +1067,8 @@ mod tests {
             "8c2bd0740bae12f940050e51d426619220114a1224f80b094f2b3c6711334551",
             "eb42b3d5acc3f61b944c18488a69cddba8c91c52875c0d69e4d9016f6c423891",
             "08b95402049ede34a64d59c88ccd3846d6c93147b633167baea2a4ae8a05ad5b",
-            "ce"),
+            "ce"
+        ),
         "cfa02e8b83e98e74ef228bf1750fb359",
         concat!(
             "3a3f39d10d0e17e01ac0c3cf9d12662409f30c601cc4bf1516966f1ed6b7f3c6",
@@ -1021,8 +1110,8 @@ mod tests {
             "b0ca2adbd867d70a49b71aeeb31150ddbdfe288c4f7cc3d37faaaeff58a14db7",
             "d05305942b5eca66938e72aa081f0f6d1b83907c7f6b62e5a03152dadf2c51c1",
             "ed66336449271cb6463f357826c61f74a54da4d609774e153c2d52d4656042b1",
-            "c42cb64699d935096a390867d7e1319730d9ce7c1e0000000000000000000000"),
-
+            "c42cb64699d935096a390867d7e1319730d9ce7c1e0000000000000000000000"
+        ),
         concat!(
             "0a564dc27a0b6cd1265cf75b32d6cfa164ceb183c515315e030acc4c2539a680",
             "f57a856f03f014f2068eb97a4a7751fb92820aecd84188ac1d333a05abda4d48",
@@ -1080,7 +1169,8 @@ mod tests {
             "cc5664631c6e64053b3a2bafdc9cd6227219e1654538eaf27eac2506f5b322bb",
             "26a47692f163abd8c191d999c3af12989dac6d70861f957b8ea8973643db4a80",
             "8f1af6a70e5a76746b09193771513244eaa5174879c8f10e19430028c8363dc9",
-            "84"),
+            "84"
+        ),
         "f8c391dbdf424c65b433d5d57a61d162",
         concat!(
             "3a196b2695aea2d588709f621252cc22531bac24a01ed3ffc4da53d96fc38568",
@@ -1122,8 +1212,8 @@ mod tests {
             "502c51bceec20336d00d53b1e4da2dd44b9c7a51268bb58aea99a14b60c71371",
             "9b291c7d0d3aa5be337f5e24fa011b65e9a8ff904ad95fbad5a891a06c947dd9",
             "e84e5b984279a76c1ad4866f15e9ec50931ad9b7e56362fff18dd33036b5a743",
-            "d289fbd02fa22cfc56d19cf6b260a7ff970f63a9a049f9300000000000000000"),
-
+            "d289fbd02fa22cfc56d19cf6b260a7ff970f63a9a049f9300000000000000000"
+        ),
         concat!(
             "0aa9c546c92890a65819717bff23201b5a9669556ffb40966d10a95fd957e2f1",
             "5796112db45aceca20cb740ecd68b2725b8b48ac84129463ee0f5da5c6415bea",
@@ -1181,7 +1271,8 @@ mod tests {
             "849c593d667e480ddf551b08938e5e4be18864604d2673b0ca110b0e4e51f1e2",
             "adb653edd893dd44d96e46bee5519aaeb044e18a409e7f4faefb4af36a923a41",
             "b43b3d20c9868980716b5ec78c1e30b7bb4a7d0f9de7cb1c8ef35d204832a9ca",
-            "de"),
+            "de"
+        ),
         "358512bd1797531ea6c247a31ce8387e",
         concat!(
             "3ae330462a7a92248de80736ff6fc7a0f82e536d1938ea2320e59ee0dba338b4",
@@ -1223,6 +1314,7 @@ mod tests {
             "99415544f7b7fec7a6b066ea584037533a339960318e5e65cf43596392bc6f22",
             "8c74bb79b3a49628c4f0a2d4f39d1873d695bca24870d2521e8f2564898fe26d",
             "9047232080e0b82bf7d2303dd66c190c532c9bf4bfeb5e9dcab9c7ac8ba52bc1",
-            "0219fcec3a844ac88eae83ac80ba90f75e0093204a8b2d000000000000000000"),
+            "0219fcec3a844ac88eae83ac80ba90f75e0093204a8b2d000000000000000000"
+        ),
     ];
 }

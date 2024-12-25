@@ -8,41 +8,37 @@
 use super::mp31::{mp_mmul, mp_sub, PRIMES};
 use super::poly_avx2::{mp_add_x8, mp_half_x8, mp_mmul_x8, mp_sub_x8};
 
-#[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
 
 use core::mem::transmute;
 
 // Most of the zint31 functions do not have AVX2-optimized versions, so we
 // re-export the plain ones.
 pub(crate) use crate::zint31::{
-    zint_mul_small,
-    zint_mod_small_unsigned,
-    zint_mod_small_signed,
-    zint_add_mul_small,
-    zint_norm_zero,
-    zint_bezout,
-    zint_add_scaled_mul_small,
-    zint_sub_scaled,
-    bitlength,
+    bitlength, zint_add_mul_small, zint_add_scaled_mul_small, zint_bezout, zint_mod_small_signed,
+    zint_mod_small_unsigned, zint_mul_small, zint_norm_zero, zint_sub_scaled,
 };
 
 // Parallel version of zint_mod_small_unsigned()
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn zint_mod_small_unsigned_x8(
-    d: *const __m256i, dlen: usize, dstride: usize,
-    yp: __m256i, yp0i: __m256i, yR2: __m256i) -> __m256i
-{
+    d: *const __m256i,
+    dlen: usize,
+    dstride: usize,
+    yp: __m256i,
+    yp0i: __m256i,
+    yR2: __m256i,
+) -> __m256i {
     let mut yx = _mm256_setzero_si256();
     let yz = mp_half_x8(yR2, yp);
     let mut dp = d.wrapping_add(dlen * (dstride >> 3));
     for _ in 0..dlen {
         dp = dp.wrapping_sub(dstride >> 3);
         let yw = _mm256_sub_epi32(_mm256_loadu_si256(dp), yp);
-        let yw = _mm256_add_epi32(yw,
-            _mm256_and_si256(yp, _mm256_srai_epi32(yw, 31)));
+        let yw = _mm256_add_epi32(yw, _mm256_and_si256(yp, _mm256_srai_epi32(yw, 31)));
         yx = mp_mmul_x8(yx, yz, yp, yp0i);
         yx = mp_add_x8(yx, yw, yp);
     }
@@ -52,17 +48,20 @@ pub(crate) unsafe fn zint_mod_small_unsigned_x8(
 // Parallel version of zint_mod_small_signed()
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn zint_mod_small_signed_x8(
-    d: *const __m256i, dlen: usize, dstride: usize,
-    yp: __m256i, yp0i: __m256i, yR2: __m256i, yRx: __m256i) -> __m256i
-{
+    d: *const __m256i,
+    dlen: usize,
+    dstride: usize,
+    yp: __m256i,
+    yp0i: __m256i,
+    yR2: __m256i,
+    yRx: __m256i,
+) -> __m256i {
     if dlen == 0 {
         return _mm256_setzero_si256();
     }
     let yz = zint_mod_small_unsigned_x8(d, dlen, dstride, yp, yp0i, yR2);
     let yl = _mm256_loadu_si256(d.wrapping_add((dlen - 1) * (dstride >> 3)));
-    let ym = _mm256_sub_epi32(
-        _mm256_setzero_si256(),
-        _mm256_srli_epi32(yl, 30));
+    let ym = _mm256_sub_epi32(_mm256_setzero_si256(), _mm256_srli_epi32(yl, 30));
     let yz = mp_sub_x8(yz, _mm256_and_si256(yRx, ym), yp);
     yz
 }
@@ -70,8 +69,11 @@ pub(crate) unsafe fn zint_mod_small_signed_x8(
 // Parallel version of zint_add_mul_small()
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn zint_add_mul_small_x8(
-    d: *mut __m256i, dstride: usize, a: &[u32], ys: __m256i)
-{
+    d: *mut __m256i,
+    dstride: usize,
+    a: &[u32],
+    ys: __m256i,
+) {
     let mut cc0 = _mm256_setzero_si256();
     let mut cc1 = _mm256_setzero_si256();
     let ys0 = ys;
@@ -95,16 +97,18 @@ pub(crate) unsafe fn zint_add_mul_small_x8(
         dp = dp.wrapping_add(dstride >> 3);
     }
 
-    _mm256_storeu_si256(dp,
-        _mm256_and_si256(_mm256_blend_epi32(
-            cc0, _mm256_slli_epi64(cc1, 32), 0xAA), ym31));
+    _mm256_storeu_si256(
+        dp,
+        _mm256_and_si256(
+            _mm256_blend_epi32(cc0, _mm256_slli_epi64(cc1, 32), 0xAA),
+            ym31,
+        ),
+    );
 }
 
 // Parallel version of zint_norm_zero()
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn zint_norm_zero_x8(
-    xp: *mut __m256i, xstride: usize, m: &[u32])
-{
+pub(crate) unsafe fn zint_norm_zero_x8(xp: *mut __m256i, xstride: usize, m: &[u32]) {
     // Compare x with p/2. We use the shifted version of p, and p
     // is odd, so we really compare with (p-1)/2; we want to perform
     // the subtraction if and only if x > (p-1)/2.
@@ -125,14 +129,16 @@ pub(crate) unsafe fn zint_norm_zero_x8(
         // lower than, equal to, or greater than wx.
         let ycc = _mm256_sub_epi32(_mm256_set1_epi32(wp as i32), yx);
         let ycc = _mm256_or_si256(
-            _mm256_srli_epi32(_mm256_sub_epi32(
-                _mm256_setzero_si256(), ycc), 31),
-            _mm256_srai_epi32(ycc, 31));
+            _mm256_srli_epi32(_mm256_sub_epi32(_mm256_setzero_si256(), ycc), 31),
+            _mm256_srai_epi32(ycc, 31),
+        );
 
         // If r != 0 then it is either 1 or -1, and we keep its
         // value. Otherwise, if r = 0, then we replace it with cc.
-        yr = _mm256_or_si256(yr, _mm256_and_si256(ycc,
-            _mm256_sub_epi32(_mm256_and_si256(yr, yone), yone)));
+        yr = _mm256_or_si256(
+            yr,
+            _mm256_and_si256(ycc, _mm256_sub_epi32(_mm256_and_si256(yr, yone), yone)),
+        );
     }
 
     // At this point, r = -1, 0 or 1, depending on whether (p-1)/2
@@ -143,13 +149,12 @@ pub(crate) unsafe fn zint_norm_zero_x8(
     let y31 = _mm256_set1_epi32(0x7FFFFFFF);
     for j in 0..m.len() {
         let yx = _mm256_loadu_si256(xp);
-        let y = _mm256_sub_epi32(
-            _mm256_sub_epi32(yx, ycc),
-            _mm256_set1_epi32(m[j] as i32));
+        let y = _mm256_sub_epi32(_mm256_sub_epi32(yx, ycc), _mm256_set1_epi32(m[j] as i32));
         ycc = _mm256_srli_epi32(y, 31);
         let yx = _mm256_or_si256(
             _mm256_andnot_si256(ym, yx),
-            _mm256_and_si256(ym, _mm256_and_si256(y, y31)));
+            _mm256_and_si256(ym, _mm256_and_si256(y, y31)),
+        );
         _mm256_storeu_si256(xp, yx);
         xp = xp.wrapping_add(xstride >> 3);
     }
@@ -169,9 +174,14 @@ pub(crate) unsafe fn zint_norm_zero_x8(
 // tmp[] is used to store temporary values and must have size at least
 // xlen elements.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn zint_rebuild_CRT(xx: &mut [u32], xlen: usize, n: usize,
-    num_sets: usize, normalize_signed: bool, tmp: &mut [u32])
-{
+pub(crate) unsafe fn zint_rebuild_CRT(
+    xx: &mut [u32],
+    xlen: usize,
+    n: usize,
+    num_sets: usize,
+    normalize_signed: bool,
+    tmp: &mut [u32],
+) {
     tmp[0] = PRIMES[0].p;
     for i in 1..xlen {
         // At entry of each iteration:
@@ -195,8 +205,7 @@ pub(crate) unsafe fn zint_rebuild_CRT(xx: &mut [u32], xlen: usize, n: usize,
                 for k in 0..(n >> 3) {
                     let ap = xxbp.wrapping_add(k);
                     let y1 = _mm256_loadu_si256(ap.wrapping_add((i * n) >> 3));
-                    let y2 = zint_mod_small_unsigned_x8(
-                        ap, i, n, yp, yp0i, yR2);
+                    let y2 = zint_mod_small_unsigned_x8(ap, i, n, yp, yp0i, yR2);
                     let y3 = mp_mmul_x8(ys, mp_sub_x8(y1, y2, yp), yp, yp0i);
                     zint_add_mul_small_x8(ap, n, &tmp[..i], y3);
                 }
