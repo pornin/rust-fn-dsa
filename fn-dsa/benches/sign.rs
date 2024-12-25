@@ -3,7 +3,10 @@
 mod util;
 use util::{banner_arch, core_cycles, FakeRNG};
 
-use fn_dsa::{KeyPairGenerator, KeyPairGeneratorStandard, SigningKey, SigningKeyStandard, sign_key_size, vrfy_key_size, signature_size, DOMAIN_NONE, HASH_ID_RAW};
+use fn_dsa::{
+    sign_key_size, signature_size, vrfy_key_size, KeyPairGenerator, KeyPairGeneratorStandard,
+    SigningKey, SigningKeyStandard, DOMAIN_NONE, HASH_ID_RAW,
+};
 
 fn bench_sign(logn: u32) -> (f64, u8) {
     let z = core_cycles();
@@ -70,13 +73,19 @@ fn main() {
     bx ^= x;
     let (w, x) = bench_sign(9);
     bx ^= x;
-    println!("fn-dsa sign (n = 512)          {:13.2}     add.: {:13.2}", v, w);
+    println!(
+        "fn-dsa sign (n = 512)          {:13.2}     add.: {:13.2}",
+        v, w
+    );
 
     let (v, x) = bench_sign_full(10);
     bx ^= x;
     let (w, x) = bench_sign(10);
     bx ^= x;
-    println!("fn-dsa sign (n = 1024)         {:13.2}     add.: {:13.2}", v, w);
+    println!(
+        "fn-dsa sign (n = 1024)         {:13.2}     add.: {:13.2}",
+        v, w
+    );
 
     println!("{}", bx);
 }

@@ -15,9 +15,7 @@ use core::mem::transmute;
 
 // Complex multiplication.
 #[inline(always)]
-pub(crate) fn flc_mul(x_re: FLR, x_im: FLR, y_re: FLR, y_im: FLR)
-    -> (FLR, FLR)
-{
+pub(crate) fn flc_mul(x_re: FLR, x_im: FLR, y_re: FLR, y_im: FLR) -> (FLR, FLR) {
     (x_re * y_re - x_im * y_im, x_re * y_im + x_im * y_re)
 }
 
@@ -53,20 +51,12 @@ pub(crate) unsafe fn FFT(logn: u32, f: &mut [FLR]) {
                     let x_im = _mm256_loadu_pd(f1_im.wrapping_add(j << 2));
                     let y_re = _mm256_loadu_pd(f2_re.wrapping_add(j << 2));
                     let y_im = _mm256_loadu_pd(f2_im.wrapping_add(j << 2));
-                    let z_re = _mm256_sub_pd(
-                        _mm256_mul_pd(s_re, y_re),
-                        _mm256_mul_pd(s_im, y_im));
-                    let z_im = _mm256_add_pd(
-                        _mm256_mul_pd(s_re, y_im),
-                        _mm256_mul_pd(s_im, y_re));
-                    _mm256_storeu_pd(f1_re.wrapping_add(j << 2),
-                        _mm256_add_pd(x_re, z_re));
-                    _mm256_storeu_pd(f1_im.wrapping_add(j << 2),
-                        _mm256_add_pd(x_im, z_im));
-                    _mm256_storeu_pd(f2_re.wrapping_add(j << 2),
-                        _mm256_sub_pd(x_re, z_re));
-                    _mm256_storeu_pd(f2_im.wrapping_add(j << 2),
-                        _mm256_sub_pd(x_im, z_im));
+                    let z_re = _mm256_sub_pd(_mm256_mul_pd(s_re, y_re), _mm256_mul_pd(s_im, y_im));
+                    let z_im = _mm256_add_pd(_mm256_mul_pd(s_re, y_im), _mm256_mul_pd(s_im, y_re));
+                    _mm256_storeu_pd(f1_re.wrapping_add(j << 2), _mm256_add_pd(x_re, z_re));
+                    _mm256_storeu_pd(f1_im.wrapping_add(j << 2), _mm256_add_pd(x_im, z_im));
+                    _mm256_storeu_pd(f2_re.wrapping_add(j << 2), _mm256_sub_pd(x_re, z_re));
+                    _mm256_storeu_pd(f2_im.wrapping_add(j << 2), _mm256_sub_pd(x_im, z_im));
                 }
             } else {
                 let s_re = GM[((m + i) << 1) + 0];
@@ -125,18 +115,12 @@ pub(crate) unsafe fn iFFT(logn: u32, f: &mut [FLR]) {
                     let x_im = _mm256_loadu_pd(f1_im.wrapping_add(j << 2));
                     let y_re = _mm256_loadu_pd(f2_re.wrapping_add(j << 2));
                     let y_im = _mm256_loadu_pd(f2_im.wrapping_add(j << 2));
-                    _mm256_storeu_pd(f1_re.wrapping_add(j << 2),
-                        _mm256_add_pd(x_re, y_re));
-                    _mm256_storeu_pd(f1_im.wrapping_add(j << 2),
-                        _mm256_add_pd(x_im, y_im));
+                    _mm256_storeu_pd(f1_re.wrapping_add(j << 2), _mm256_add_pd(x_re, y_re));
+                    _mm256_storeu_pd(f1_im.wrapping_add(j << 2), _mm256_add_pd(x_im, y_im));
                     let x_re = _mm256_sub_pd(x_re, y_re);
                     let x_im = _mm256_sub_pd(x_im, y_im);
-                    let z_re = _mm256_sub_pd(
-                        _mm256_mul_pd(x_re, s_re),
-                        _mm256_mul_pd(x_im, s_im));
-                    let z_im = _mm256_add_pd(
-                        _mm256_mul_pd(x_re, s_im),
-                        _mm256_mul_pd(x_im, s_re));
+                    let z_re = _mm256_sub_pd(_mm256_mul_pd(x_re, s_re), _mm256_mul_pd(x_im, s_im));
+                    let z_im = _mm256_add_pd(_mm256_mul_pd(x_re, s_im), _mm256_mul_pd(x_im, s_re));
                     _mm256_storeu_pd(f2_re.wrapping_add(j << 2), z_re);
                     _mm256_storeu_pd(f2_im.wrapping_add(j << 2), z_im);
                 }
@@ -193,9 +177,9 @@ pub(crate) unsafe fn poly_set_small(logn: u32, d: &mut [FLR], f: &[i8]) {
             let y1 = _mm256_cvtepi32_pd(_mm_cvtepi8_epi32(x1));
             let y2 = _mm256_cvtepi32_pd(_mm_cvtepi8_epi32(x2));
             let y3 = _mm256_cvtepi32_pd(_mm_cvtepi8_epi32(x3));
-            _mm256_storeu_pd(dp.wrapping_add((i << 4) +  0), y0);
-            _mm256_storeu_pd(dp.wrapping_add((i << 4) +  4), y1);
-            _mm256_storeu_pd(dp.wrapping_add((i << 4) +  8), y2);
+            _mm256_storeu_pd(dp.wrapping_add((i << 4) + 0), y0);
+            _mm256_storeu_pd(dp.wrapping_add((i << 4) + 4), y1);
+            _mm256_storeu_pd(dp.wrapping_add((i << 4) + 8), y2);
             _mm256_storeu_pd(dp.wrapping_add((i << 4) + 12), y3);
         }
     } else {
@@ -273,12 +257,8 @@ pub(crate) unsafe fn poly_mul_fft(logn: u32, a: &mut [FLR], b: &[FLR]) {
             let a_im = _mm256_loadu_pd(ap.wrapping_add((i << 2) + hn));
             let b_re = _mm256_loadu_pd(bp.wrapping_add(i << 2));
             let b_im = _mm256_loadu_pd(bp.wrapping_add((i << 2) + hn));
-            let d_re = _mm256_sub_pd(
-                _mm256_mul_pd(a_re, b_re),
-                _mm256_mul_pd(a_im, b_im));
-            let d_im = _mm256_add_pd(
-                _mm256_mul_pd(a_re, b_im),
-                _mm256_mul_pd(a_im, b_re));
+            let d_re = _mm256_sub_pd(_mm256_mul_pd(a_re, b_re), _mm256_mul_pd(a_im, b_im));
+            let d_im = _mm256_add_pd(_mm256_mul_pd(a_re, b_im), _mm256_mul_pd(a_im, b_re));
             _mm256_storeu_pd(ap.wrapping_add(i << 2), d_re);
             _mm256_storeu_pd(ap.wrapping_add((i << 2) + hn), d_im);
         }
@@ -304,12 +284,8 @@ pub(crate) unsafe fn poly_muladj_fft(logn: u32, a: &mut [FLR], b: &[FLR]) {
             let a_im = _mm256_loadu_pd(ap.wrapping_add((i << 2) + hn));
             let b_re = _mm256_loadu_pd(bp.wrapping_add(i << 2));
             let b_im = _mm256_loadu_pd(bp.wrapping_add((i << 2) + hn));
-            let d_re = _mm256_add_pd(
-                _mm256_mul_pd(a_re, b_re),
-                _mm256_mul_pd(a_im, b_im));
-            let d_im = _mm256_sub_pd(
-                _mm256_mul_pd(a_im, b_re),
-                _mm256_mul_pd(a_re, b_im));
+            let d_re = _mm256_add_pd(_mm256_mul_pd(a_re, b_re), _mm256_mul_pd(a_im, b_im));
+            let d_im = _mm256_sub_pd(_mm256_mul_pd(a_im, b_re), _mm256_mul_pd(a_re, b_im));
             _mm256_storeu_pd(ap.wrapping_add(i << 2), d_re);
             _mm256_storeu_pd(ap.wrapping_add((i << 2) + hn), d_im);
         }
@@ -334,9 +310,7 @@ pub(crate) unsafe fn poly_mulownadj_fft(logn: u32, a: &mut [FLR]) {
         for i in 0..(1usize << (logn - 3)) {
             let a_re = _mm256_loadu_pd(ap.wrapping_add(i << 2));
             let a_im = _mm256_loadu_pd(ap.wrapping_add((i << 2) + hn));
-            let d_re = _mm256_add_pd(
-                _mm256_mul_pd(a_re, a_re),
-                _mm256_mul_pd(a_im, a_im));
+            let d_re = _mm256_add_pd(_mm256_mul_pd(a_re, a_re), _mm256_mul_pd(a_im, a_im));
             _mm256_storeu_pd(ap.wrapping_add(i << 2), d_re);
             _mm256_storeu_pd(ap.wrapping_add((i << 2) + hn), zero);
         }
@@ -375,9 +349,7 @@ pub(crate) unsafe fn poly_mulconst(logn: u32, a: &mut [FLR], x: FLR) {
 // coefficients. g00 is unmodified. All polynomials are in FFT
 // representation.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_LDL_fft(logn: u32,
-    g00: &[FLR], g01: &mut [FLR], g11: &mut [FLR])
-{
+pub(crate) unsafe fn poly_LDL_fft(logn: u32, g00: &[FLR], g01: &mut [FLR], g11: &mut [FLR]) {
     let hn = 1usize << (logn - 1);
     if logn >= 3 {
         let g00p = transmute::<*const FLR, *const f64>(g00.as_ptr());
@@ -393,14 +365,13 @@ pub(crate) unsafe fn poly_LDL_fft(logn: u32,
             let inv_g00_re = _mm256_div_pd(one, g00_re);
             let mu_re = _mm256_mul_pd(g01_re, inv_g00_re);
             let mu_im = _mm256_mul_pd(g01_im, inv_g00_re);
-            let zo_re = _mm256_add_pd(
-                _mm256_mul_pd(mu_re, g01_re),
-                _mm256_mul_pd(mu_im, g01_im));
-            _mm256_storeu_pd(g11p.wrapping_add(i << 2),
-                _mm256_sub_pd(g11_re, zo_re));
+            let zo_re = _mm256_add_pd(_mm256_mul_pd(mu_re, g01_re), _mm256_mul_pd(mu_im, g01_im));
+            _mm256_storeu_pd(g11p.wrapping_add(i << 2), _mm256_sub_pd(g11_re, zo_re));
             _mm256_storeu_pd(g01p.wrapping_add(i << 2), mu_re);
-            _mm256_storeu_pd(g01p.wrapping_add((i << 2) + hn),
-                _mm256_xor_pd(mu_im, mzero));
+            _mm256_storeu_pd(
+                g01p.wrapping_add((i << 2) + hn),
+                _mm256_xor_pd(mu_im, mzero),
+            );
         }
     } else {
         for i in 0..hn {
@@ -422,9 +393,7 @@ pub(crate) unsafe fn poly_LDL_fft(logn: u32,
 // polynomials f0 and f1 (modulo X^(n/2)+1) are such that
 // f = f0(x^2) + x*f1(x^2). All polynomials are in FFT representation.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_split_fft(logn: u32,
-    f0: &mut [FLR], f1: &mut [FLR], f: &[FLR])
-{
+pub(crate) unsafe fn poly_split_fft(logn: u32, f0: &mut [FLR], f1: &mut [FLR], f: &[FLR]) {
     let hn = 1usize << (logn - 1);
     let qn = hn >> 1;
 
@@ -443,22 +412,25 @@ pub(crate) unsafe fn poly_split_fft(logn: u32,
 
             let ff0 = _mm256_mul_pd(_mm256_hadd_pd(ab_re, ab_im), yh);
             let ff0 = _mm256_permute4x64_pd(ff0, 0xD8);
-            _mm_storeu_pd(f0p.wrapping_add(i << 1),
-                _mm256_extractf128_pd(ff0, 0));
-            _mm_storeu_pd(f0p.wrapping_add((i << 1) + qn),
-                _mm256_extractf128_pd(ff0, 1));
+            _mm_storeu_pd(f0p.wrapping_add(i << 1), _mm256_extractf128_pd(ff0, 0));
+            _mm_storeu_pd(
+                f0p.wrapping_add((i << 1) + qn),
+                _mm256_extractf128_pd(ff0, 1),
+            );
 
             let ff1 = _mm256_mul_pd(_mm256_hsub_pd(ab_re, ab_im), yh);
             let gmt = _mm256_loadu_pd(gp.wrapping_add((i << 2) + n));
             let ff2 = _mm256_shuffle_pd(ff1, ff1, 0x5);
             let ff3 = _mm256_hadd_pd(
                 _mm256_mul_pd(ff1, gmt),
-                _mm256_xor_pd(_mm256_mul_pd(ff2, gmt), sv));
+                _mm256_xor_pd(_mm256_mul_pd(ff2, gmt), sv),
+            );
             let ff3 = _mm256_permute4x64_pd(ff3, 0xD8);
-            _mm_storeu_pd(f1p.wrapping_add(i << 1),
-                _mm256_extractf128_pd(ff3, 0));
-            _mm_storeu_pd(f1p.wrapping_add((i << 1) + qn),
-                _mm256_extractf128_pd(ff3, 1));
+            _mm_storeu_pd(f1p.wrapping_add(i << 1), _mm256_extractf128_pd(ff3, 0));
+            _mm_storeu_pd(
+                f1p.wrapping_add((i << 1) + qn),
+                _mm256_extractf128_pd(ff3, 1),
+            );
         }
     } else {
         // If logn = 1 then the loop is entirely skipped.
@@ -474,8 +446,12 @@ pub(crate) unsafe fn poly_split_fft(logn: u32,
             f0[i + qn] = t_im.half();
 
             let (t_re, t_im) = (a_re - b_re, a_im - b_im);
-            let (u_re, u_im) = flc_mul(t_re, t_im,
-                GM[((i + hn) << 1) + 0], -GM[((i + hn) << 1) + 1]);
+            let (u_re, u_im) = flc_mul(
+                t_re,
+                t_im,
+                GM[((i + hn) << 1) + 0],
+                -GM[((i + hn) << 1) + 1],
+            );
             f1[i] = u_re.half();
             f1[i + qn] = u_im.half();
         }
@@ -486,9 +462,7 @@ pub(crate) unsafe fn poly_split_fft(logn: u32,
 // is self-adjoint (i.e. all its FFT coefficients are real). On output,
 // f0 is self-adjoint, but f1 is not necessarily self-adjoint.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_split_selfadj_fft(logn: u32,
-    f0: &mut [FLR], f1: &mut [FLR], f: &[FLR])
-{
+pub(crate) unsafe fn poly_split_selfadj_fft(logn: u32, f0: &mut [FLR], f1: &mut [FLR], f: &[FLR]) {
     let hn = 1usize << (logn - 1);
     let qn = hn >> 1;
 
@@ -508,8 +482,7 @@ pub(crate) unsafe fn poly_split_selfadj_fft(logn: u32,
 
             let ff0 = _mm256_mul_pd(_mm256_hadd_pd(ab_re, zero), yh);
             let ff0 = _mm256_permute4x64_pd(ff0, 0xD8);
-            _mm_storeu_pd(f0p.wrapping_add(i << 1),
-                _mm256_extractf128_pd(ff0, 0));
+            _mm_storeu_pd(f0p.wrapping_add(i << 1), _mm256_extractf128_pd(ff0, 0));
             _mm_storeu_pd(f0p.wrapping_add((i << 1) + qn), zero_x);
 
             let ff1 = _mm256_mul_pd(_mm256_hsub_pd(ab_re, zero), yh);
@@ -517,12 +490,14 @@ pub(crate) unsafe fn poly_split_selfadj_fft(logn: u32,
             let ff2 = _mm256_shuffle_pd(ff1, ff1, 0x5);
             let ff3 = _mm256_hadd_pd(
                 _mm256_mul_pd(ff1, gmt),
-                _mm256_xor_pd(_mm256_mul_pd(ff2, gmt), sv));
+                _mm256_xor_pd(_mm256_mul_pd(ff2, gmt), sv),
+            );
             let ff3 = _mm256_permute4x64_pd(ff3, 0xD8);
-            _mm_storeu_pd(f1p.wrapping_add(i << 1),
-                _mm256_extractf128_pd(ff3, 0));
-            _mm_storeu_pd(f1p.wrapping_add((i << 1) + qn),
-                _mm256_extractf128_pd(ff3, 1));
+            _mm_storeu_pd(f1p.wrapping_add(i << 1), _mm256_extractf128_pd(ff3, 0));
+            _mm_storeu_pd(
+                f1p.wrapping_add((i << 1) + qn),
+                _mm256_extractf128_pd(ff3, 1),
+            );
         }
     } else {
         // If logn = 1 then the loop is entirely skipped.
@@ -548,9 +523,7 @@ pub(crate) unsafe fn poly_split_selfadj_fft(logn: u32,
 // and f1 (modulo X^(n/2)+1), compute f = f0(x^2) + x*f1(x^2). All
 // polynomials are in FFT representation.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_merge_fft(logn: u32,
-    f: &mut [FLR], f0: &[FLR], f1: &[FLR])
-{
+pub(crate) unsafe fn poly_merge_fft(logn: u32, f: &mut [FLR], f0: &[FLR], f1: &[FLR]) {
     let hn = 1usize << (logn - 1);
     let qn = hn >> 1;
 
@@ -573,12 +546,8 @@ pub(crate) unsafe fn poly_merge_fft(logn: u32,
             let g_re = _mm256_permute4x64_pd(g_re, 0xD8);
             let g_im = _mm256_permute4x64_pd(g_im, 0xD8);
 
-            let b_re = _mm256_sub_pd(
-                _mm256_mul_pd(c_re, g_re),
-                _mm256_mul_pd(c_im, g_im));
-            let b_im = _mm256_add_pd(
-                _mm256_mul_pd(c_re, g_im),
-                _mm256_mul_pd(c_im, g_re));
+            let b_re = _mm256_sub_pd(_mm256_mul_pd(c_re, g_re), _mm256_mul_pd(c_im, g_im));
+            let b_im = _mm256_add_pd(_mm256_mul_pd(c_re, g_im), _mm256_mul_pd(c_im, g_re));
 
             let t_re = _mm256_add_pd(a_re, b_re);
             let t_im = _mm256_add_pd(a_im, b_im);
@@ -589,14 +558,22 @@ pub(crate) unsafe fn poly_merge_fft(logn: u32,
             let tu2_re = _mm256_unpackhi_pd(t_re, u_re);
             let tu1_im = _mm256_unpacklo_pd(t_im, u_im);
             let tu2_im = _mm256_unpackhi_pd(t_im, u_im);
-            _mm256_storeu_pd(fp.wrapping_add(i << 3),
-                _mm256_permute2f128_pd(tu1_re, tu2_re, 0x20));
-            _mm256_storeu_pd(fp.wrapping_add((i << 3) + 4),
-                _mm256_permute2f128_pd(tu1_re, tu2_re, 0x31));
-            _mm256_storeu_pd(fp.wrapping_add((i << 3) + hn),
-                _mm256_permute2f128_pd(tu1_im, tu2_im, 0x20));
-            _mm256_storeu_pd(fp.wrapping_add((i << 3) + hn + 4),
-                _mm256_permute2f128_pd(tu1_im, tu2_im, 0x31));
+            _mm256_storeu_pd(
+                fp.wrapping_add(i << 3),
+                _mm256_permute2f128_pd(tu1_re, tu2_re, 0x20),
+            );
+            _mm256_storeu_pd(
+                fp.wrapping_add((i << 3) + 4),
+                _mm256_permute2f128_pd(tu1_re, tu2_re, 0x31),
+            );
+            _mm256_storeu_pd(
+                fp.wrapping_add((i << 3) + hn),
+                _mm256_permute2f128_pd(tu1_im, tu2_im, 0x20),
+            );
+            _mm256_storeu_pd(
+                fp.wrapping_add((i << 3) + hn + 4),
+                _mm256_permute2f128_pd(tu1_im, tu2_im, 0x31),
+            );
         }
     } else {
         // If logn = 1 then the loop is entirely skipped.
@@ -605,8 +582,12 @@ pub(crate) unsafe fn poly_merge_fft(logn: u32,
 
         for i in 0..qn {
             let (a_re, a_im) = (f0[i], f0[i + qn]);
-            let (b_re, b_im) = flc_mul(f1[i], f1[i + qn],
-                GM[((i + hn) << 1) + 0], GM[((i + hn) << 1) + 1]);
+            let (b_re, b_im) = flc_mul(
+                f1[i],
+                f1[i + qn],
+                GM[((i + hn) << 1) + 0],
+                GM[((i + hn) << 1) + 1],
+            );
             f[(i << 1) + 0] = a_re + b_re;
             f[(i << 1) + 0 + hn] = a_im + b_im;
             f[(i << 1) + 1] = a_re - b_re;
@@ -642,7 +623,7 @@ mod tests {
         let (f0, tmp) = tmp.split_at_mut(hn);
         let (f1, tmp) = tmp.split_at_mut(hn);
         let (g0, tmp) = tmp.split_at_mut(hn);
-        let (g1, _)   = tmp.split_at_mut(hn);
+        let (g1, _) = tmp.split_at_mut(hn);
         for ctr in 0..(1u32 << (15 - logn)) {
             rand_poly(&mut rng, f);
             g.copy_from_slice(f);

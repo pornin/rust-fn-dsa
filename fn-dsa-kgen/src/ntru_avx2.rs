@@ -7,25 +7,23 @@ use super::poly_avx2::*;
 use super::vect_avx2::*;
 use super::zint31_avx2::*;
 
-#[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
 
 use core::mem::transmute;
 
-// ======================================================================== 
+// ========================================================================
 // Solving the NTRU equation (with AVX2 optimizations).
-// ======================================================================== 
+// ========================================================================
 
 // Check that (f,g) has an acceptable orthogonalized norm.
 // If this function returns false, then the (f,g) pair should be
 // rejected.
 // tmp min size: 2.5*n
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn check_ortho_norm(
-    logn: u32, f: &[i8], g: &[i8], tmp: &mut [FXR]) -> bool
-{
+pub(crate) unsafe fn check_ortho_norm(logn: u32, f: &[i8], g: &[i8], tmp: &mut [FXR]) -> bool {
     assert!(logn >= 2);
     let n = 1usize << logn;
     let (fx, tmp) = tmp.split_at_mut(n);
@@ -61,21 +59,21 @@ const Q: u32 = 12289;
 //   (F', G') from deeper level use tlen words for each coefficient
 //   unreduced (F, G) at this level use llen words for each coefficient
 //   output (F, G) use slen words for each coefficient
-const MOD_SMALL_BL: [usize; 11] = [ 1, 1, 2, 3,  4,  8, 14, 27,  53, 104, 207 ];
-const MOD_LARGE_BL: [usize; 10] = [ 1, 2, 3, 6, 11, 21, 40, 78, 155, 308 ];
+const MOD_SMALL_BL: [usize; 11] = [1, 1, 2, 3, 4, 8, 14, 27, 53, 104, 207];
+const MOD_LARGE_BL: [usize; 10] = [1, 2, 3, 6, 11, 21, 40, 78, 155, 308];
 
 // Minimum depth for which intermediate (f,g) values are saved.
-const MIN_SAVE_FG: [u32; 11] = [ 0, 0, 1, 2, 2, 2, 2, 2, 2, 3, 3 ];
+const MIN_SAVE_FG: [u32; 11] = [0, 0, 1, 2, 2, 2, 2, 2, 2, 3, 3];
 
 // When log(n) >= MIN_LOGN_FGNTT, we use the NTT to subtract (k*f,k*g)
 // from (F,G) during the reduction.
 const MIN_LOGN_FGNTT: u32 = 4;
 
 // Number of top words to consider during reduction.
-const WORD_WIN: [usize; 10] = [ 1, 1, 2, 2, 2, 3, 3, 4, 5, 7 ];
+const WORD_WIN: [usize; 10] = [1, 1, 2, 2, 2, 3, 3, 4, 5, 7];
 
 // Number of bits gained per each round of reduction.
-const REDUCE_BITS: [u32; 11] = [ 16, 16, 16, 16, 16, 16, 16, 16, 16, 13, 11 ];
+const REDUCE_BITS: [u32; 11] = [16, 16, 16, 16, 16, 16, 16, 16, 16, 13, 11];
 
 // Given polynomials f and g (modulo X^n+1 with n = 2^logn), find
 // polynomials F and G such that:
@@ -87,10 +85,15 @@ const REDUCE_BITS: [u32; 11] = [ 16, 16, 16, 16, 16, 16, 16, 16, 16, 13, 11 ];
 // tmp_u32 min size: 6*n
 // tmp_fxr min size: 2.5*n
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn solve_NTRU(logn: u32,
-    f: &[i8], g: &[i8], F: &mut [i8], G: &mut [i8],
-    tmp_u32: &mut [u32], tmp_fxr: &mut [FXR]) -> bool
-{
+pub(crate) unsafe fn solve_NTRU(
+    logn: u32,
+    f: &[i8],
+    g: &[i8],
+    F: &mut [i8],
+    G: &mut [i8],
+    tmp_u32: &mut [u32],
+    tmp_fxr: &mut [FXR],
+) -> bool {
     assert!(1 <= logn && logn <= 10);
     let n = 1usize << logn;
     assert!(f.len() == n && g.len() == n);
@@ -132,9 +135,7 @@ pub(crate) unsafe fn solve_NTRU(logn: u32,
 // The two integers are written into tmp[], over MOD_SMALL_BL[logn]
 // words each.
 #[target_feature(enable = "avx2")]
-unsafe fn solve_NTRU_deepest(logn: u32,
-    f: &[i8], g: &[i8], tmp: &mut [u32]) -> bool
-{
+unsafe fn solve_NTRU_deepest(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) -> bool {
     let slen = MOD_SMALL_BL[logn as usize];
 
     // Get (f,g) at the deepest level. Obtained (f,g) are in RNS+NTT;
@@ -173,7 +174,7 @@ unsafe fn solve_NTRU_deepest(logn: u32,
     // Multiply the obtained (F,G) by q to get a solution f*G - g*F = q.
     if zint_mul_small(Fp, Q) != 0 || zint_mul_small(Gp, Q) != 0 {
         // If either multiplication overflows, we reject.
-        return false
+        return false;
     }
 
     return true;
@@ -181,10 +182,14 @@ unsafe fn solve_NTRU_deepest(logn: u32,
 
 // Solving the NTRU equation, intermediate level.
 #[target_feature(enable = "avx2")]
-unsafe fn solve_NTRU_intermediate(logn_top: u32,
-    f: &[i8], g: &[i8], depth: u32,
-    tmp_u32: &mut [u32], tmp_fxr: &mut [FXR]) -> bool
-{
+unsafe fn solve_NTRU_intermediate(
+    logn_top: u32,
+    f: &[i8],
+    g: &[i8],
+    depth: u32,
+    tmp_u32: &mut [u32],
+    tmp_fxr: &mut [FXR],
+) -> bool {
     let logn = logn_top - depth;
     let n = 1usize << logn;
     let hn = n >> 1;
@@ -206,8 +211,7 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
     let min_sav = MIN_SAVE_FG[logn_top as usize];
     if depth < min_sav {
         // (f,g) were not saved previously, recompute them.
-        make_fg_intermediate(logn_top, f, g, depth,
-            &mut tmp_u32[(2 * tlen * hn)..]);
+        make_fg_intermediate(logn_top, f, g, depth, &mut tmp_u32[(2 * tlen * hn)..]);
     } else {
         // (f,g) were saved previously, get them.
         let mut sav_off = tmp_u32.len();
@@ -231,7 +235,9 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
     //   Gd   G from deeper level (tlen * hn) (plain)
     tmp_u32.copy_within(0..(2 * tlen * hn), 2 * (llen + slen) * n);
     tmp_u32.copy_within(
-        (2 * tlen * hn)..(2 * tlen * hn + 2 * slen * n), 2 * llen * n);
+        (2 * tlen * hn)..(2 * tlen * hn + 2 * slen * n),
+        2 * llen * n,
+    );
 
     // Convert Fd and Gd to RNS, with output temporarily stored in (Ft, Gt).
     // Fd and Gd have degree hn only; we store the values for each modulus p
@@ -239,7 +245,7 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
     {
         let (Ft, work) = tmp_u32[..].split_at_mut(llen * n);
         let (Gt, work) = work.split_at_mut(llen * n);
-        let (_, work) = work.split_at_mut(2 * slen * n);  // ft and gt
+        let (_, work) = work.split_at_mut(2 * slen * n); // ft and gt
         let (Fd, work) = work.split_at_mut(tlen * hn);
         let (Gd, _) = work.split_at_mut(tlen * hn);
         for i in 0..llen {
@@ -260,19 +266,19 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                 let Ftp = Ftp.wrapping_add(kt >> 3);
                 let Gtp = Gtp.wrapping_add(kt >> 3);
                 for j in 0..(hn >> 3) {
-                    _mm256_storeu_si256(Ftp.wrapping_add(j),
-                        zint_mod_small_signed_x8(Fdp.wrapping_add(j),
-                            tlen, hn, yp, yp0i, yR2, yRx));
-                    _mm256_storeu_si256(Gtp.wrapping_add(j),
-                        zint_mod_small_signed_x8(Gdp.wrapping_add(j),
-                            tlen, hn, yp, yp0i, yR2, yRx));
+                    _mm256_storeu_si256(
+                        Ftp.wrapping_add(j),
+                        zint_mod_small_signed_x8(Fdp.wrapping_add(j), tlen, hn, yp, yp0i, yR2, yRx),
+                    );
+                    _mm256_storeu_si256(
+                        Gtp.wrapping_add(j),
+                        zint_mod_small_signed_x8(Gdp.wrapping_add(j), tlen, hn, yp, yp0i, yR2, yRx),
+                    );
                 }
             } else {
                 for j in 0..hn {
-                    Ft[kt + j] = zint_mod_small_signed(
-                        &Fd[j..], tlen, hn, p, p0i, R2, Rx);
-                    Gt[kt + j] = zint_mod_small_signed(
-                        &Gd[j..], tlen, hn, p, p0i, R2, Rx);
+                    Ft[kt + j] = zint_mod_small_signed(&Fd[j..], tlen, hn, p, p0i, R2, Rx);
+                    Gt[kt + j] = zint_mod_small_signed(&Gd[j..], tlen, hn, p, p0i, R2, Rx);
                 }
             }
         }
@@ -286,7 +292,7 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
     // representation.
     {
         let (FGt, work) = tmp_u32[..].split_at_mut(2 * llen * n);
-        let (fgt, work) = work.split_at_mut(2 * slen * n);  // ft and gt
+        let (fgt, work) = work.split_at_mut(2 * slen * n); // ft and gt
         for i in 0..llen {
             let p = PRIMES[i].p;
             let p0i = PRIMES[i].p0i;
@@ -318,10 +324,8 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                 } else {
                     let Rx = mp_Rx31(slen as u32, p, p0i, R2);
                     for j in 0..n {
-                        fx[j] = zint_mod_small_signed(
-                            &ft[j..], slen, n, p, p0i, R2, Rx);
-                        gx[j] = zint_mod_small_signed(
-                            &gt[j..], slen, n, p, p0i, R2, Rx);
+                        fx[j] = zint_mod_small_signed(&ft[j..], slen, n, p, p0i, R2, Rx);
+                        gx[j] = zint_mod_small_signed(&gt[j..], slen, n, p, p0i, R2, Rx);
                     }
                     mp_NTT(logn, fx, gm, p, p0i);
                     mp_NTT(logn, gx, gm, p, p0i);
@@ -353,14 +357,14 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                         let ygb = _mm256_srli_epi64(yga, 32);
                         let xFe = _mm_loadu_si128(
                             transmute::<*mut __m256i, *const __m128i>(Ftp)
-                            .wrapping_add(j + (hn >> 2)));
+                                .wrapping_add(j + (hn >> 2)),
+                        );
                         let xGe = _mm_loadu_si128(
                             transmute::<*mut __m256i, *const __m128i>(Gtp)
-                            .wrapping_add(j + (hn >> 2)));
-                        let yFp = _mm256_permute4x64_epi64(
-                            _mm256_castsi128_si256(xFe), 0x50);
-                        let yGp = _mm256_permute4x64_epi64(
-                            _mm256_castsi128_si256(xGe), 0x50);
+                                .wrapping_add(j + (hn >> 2)),
+                        );
+                        let yFp = _mm256_permute4x64_epi64(_mm256_castsi128_si256(xFe), 0x50);
+                        let yGp = _mm256_permute4x64_epi64(_mm256_castsi128_si256(xGe), 0x50);
                         let yFp = _mm256_shuffle_epi32(yFp, 0x30);
                         let yGp = _mm256_shuffle_epi32(yGp, 0x30);
                         let yFp = mp_mmul_x4(yFp, yR2, yp, yp0i);
@@ -369,10 +373,14 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                         let yFe1 = mp_mmul_x4(yga, yFp, yp, yp0i);
                         let yGe0 = mp_mmul_x4(yfb, yGp, yp, yp0i);
                         let yGe1 = mp_mmul_x4(yfa, yGp, yp, yp0i);
-                        _mm256_storeu_si256(Ftp.wrapping_add(j),
-                            _mm256_or_si256(yFe0, _mm256_slli_epi64(yFe1, 32)));
-                        _mm256_storeu_si256(Gtp.wrapping_add(j),
-                            _mm256_or_si256(yGe0, _mm256_slli_epi64(yGe1, 32)));
+                        _mm256_storeu_si256(
+                            Ftp.wrapping_add(j),
+                            _mm256_or_si256(yFe0, _mm256_slli_epi64(yFe1, 32)),
+                        );
+                        _mm256_storeu_si256(
+                            Gtp.wrapping_add(j),
+                            _mm256_or_si256(yGe0, _mm256_slli_epi64(yGe1, 32)),
+                        );
                     }
                 } else {
                     for j in 0..hn {
@@ -433,7 +441,8 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
     if use_sub_ntt {
         tmp_u32[..].copy_within(
             (2 * llen * n + slen * n)..(2 * llen * n + 2 * slen * n),
-            2 * llen * n + (slen + 1) * n);
+            2 * llen * n + (slen + 1) * n,
+        );
     }
     let slen_adj = if use_sub_ntt { slen + 1 } else { slen };
 
@@ -497,13 +506,11 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
         // scale_x is the maximum bit length of f and g (beyond scale_fg)
         let scale_xf = poly_max_bitlength(logn, &ft[(n * blen)..], rlen);
         let scale_xg = poly_max_bitlength(logn, &gt[(n * blen)..], rlen);
-        scale_x = scale_xf
-            ^ ((scale_xf ^ scale_xg) & tbmask(scale_xf.wrapping_sub(scale_xg)));
+        scale_x = scale_xf ^ ((scale_xf ^ scale_xg) & tbmask(scale_xf.wrapping_sub(scale_xg)));
 
         // scale_t is from logn, but not greater than scale_x
         let scale_t = 15 - logn;
-        let scale_t = scale_t
-            ^ ((scale_t ^ scale_x) & tbmask(scale_x.wrapping_sub(scale_t)));
+        let scale_t = scale_t ^ ((scale_t ^ scale_x) & tbmask(scale_x.wrapping_sub(scale_t)));
         let scdiff = scale_x - scale_t;
 
         // Extract the approximations of f and g (scaled).
@@ -524,7 +531,8 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                 rt3[i].0 as i64,
                 (-rt3[i + hn]).0 as i64,
                 rt4[i].0 as i64,
-                (-rt4[i + hn]).0 as i64);
+                (-rt4[i + hn]).0 as i64,
+            );
             let yd = _mm256_set1_epi64x(rt1[i].0 as i64);
             let yr = fxr_div_x4(yn, yd);
             let rr: [FXR; 4] = transmute(yr);
@@ -581,8 +589,7 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                 let Rx = mp_Rx31(slen as u32, p, p0i, R2);
                 mp_mkgm(logn, PRIMES[i].g, p, p0i, gm);
                 for j in 0..n {
-                    tn[(i << logn) + j] = zint_mod_small_signed(
-                        &ft[j..], slen, n, p, p0i, R2, Rx);
+                    tn[(i << logn) + j] = zint_mod_small_signed(&ft[j..], slen, n, p, p0i, R2, Rx);
                 }
                 mp_NTT(logn, &mut tn[(i << logn)..], gm, p, p0i);
             }
@@ -594,8 +601,7 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                 let Rx = mp_Rx31(slen as u32, p, p0i, R2);
                 mp_mkgm(logn, PRIMES[i].g, p, p0i, gm);
                 for j in 0..n {
-                    tn[(i << logn) + j] = zint_mod_small_signed(
-                        &gt[j..], slen, n, p, p0i, R2, Rx);
+                    tn[(i << logn) + j] = zint_mod_small_signed(&gt[j..], slen, n, p, p0i, R2, Rx);
                 }
                 mp_NTT(logn, &mut tn[(i << logn)..], gm, p, p0i);
             }
@@ -612,10 +618,8 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
             // scale_FG + scale_x.
             let (sch, coff) = divrem31(scale_FG);
             let clen = sch as usize;
-            poly_big_to_fixed(logn,
-                &Ft[(clen * n)..], FGlen - clen, scale_x + coff, rt1);
-            poly_big_to_fixed(logn,
-                &Gt[(clen * n)..], FGlen - clen, scale_x + coff, rt2);
+            poly_big_to_fixed(logn, &Ft[(clen * n)..], FGlen - clen, scale_x + coff, rt1);
+            poly_big_to_fixed(logn, &Gt[(clen * n)..], FGlen - clen, scale_x + coff, rt2);
 
             // rt2 <- (F*adj(f) + G*adj(g)) / (f*adj(f) + g*adj(g))
             vect_FFT(logn, rt1);
@@ -636,8 +640,7 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
             let scale_k = scale_FG - scale_fg;
 
             if depth == 1 {
-                poly_sub_kfg_scaled_depth1(logn_top,
-                    Ft, Gt, FGlen, k, scale_k, f, g, t2);
+                poly_sub_kfg_scaled_depth1(logn_top, Ft, Gt, FGlen, k, scale_k, f, g, t2);
             } else if use_sub_ntt {
                 let (ft, gt) = fgt.split_at_mut(slen_adj * n);
                 poly_sub_scaled_ntt(logn, Ft, FGlen, ft, slen, k, scale_k, t2);
@@ -658,9 +661,7 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
             } else {
                 scale_FG -= reduce_bits;
             }
-            while FGlen > slen
-                && 31 * ((FGlen - slen) as u32) > scale_FG - scale_fg + 30
-            {
+            while FGlen > slen && 31 * ((FGlen - slen) as u32) > scale_FG - scale_fg + 30 {
                 FGlen -= 1;
             }
         }
@@ -686,16 +687,14 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
     // already in NTT representation and we only need the first coefficient.
     if use_sub_ntt {
         // ft mod p0 (NTT)
-        tmp_u32.copy_within(
-            ((2 * llen) * n)..((2 * llen + 1) * n),
-            2 * slen * n);
+        tmp_u32.copy_within(((2 * llen) * n)..((2 * llen + 1) * n), 2 * slen * n);
         // gt mod p0 (NTT)
         tmp_u32.copy_within(
             ((2 * llen + slen_adj) * n)..((2 * llen + slen_adj + 1) * n),
-            (2 * slen + slen) * n);
+            (2 * slen + slen) * n,
+        );
     } else {
-        tmp_u32.copy_within(
-            (2 * llen * n)..(2 * (llen + slen) * n), 2 * slen * n);
+        tmp_u32.copy_within((2 * llen * n)..(2 * (llen + slen) * n), 2 * slen * n);
     }
 
     {
@@ -717,10 +716,8 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
         // This is already done if use_sub_ntt is true
         if !use_sub_ntt {
             for i in 0..n {
-                ft[i] = zint_mod_small_signed(
-                    &ft[i..], slen, n, p, p0i, R2, Rx);
-                gt[i] = zint_mod_small_signed(
-                    &gt[i..], slen, n, p, p0i, R2, Rx);
+                ft[i] = zint_mod_small_signed(&ft[i..], slen, n, p, p0i, R2, Rx);
+                gt[i] = zint_mod_small_signed(&gt[i..], slen, n, p, p0i, R2, Rx);
             }
             mp_NTT(logn, ft, gm, p, p0i);
             mp_NTT(logn, gt, gm, p, p0i);
@@ -756,7 +753,9 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
                 let y2 = _mm256_loadu_si256(t2p.wrapping_add(i));
                 let yd = mp_sub_x8(
                     mp_mmul_x8(yf, y2, yp, yp0i),
-                    mp_mmul_x8(yg, y1, yp, yp0i), yp);
+                    mp_mmul_x8(yg, y1, yp, yp0i),
+                    yp,
+                );
                 yr = _mm256_or_si256(yr, _mm256_xor_si256(yd, ye));
             }
             let yr = _mm256_cmpeq_epi32(yr, _mm256_setzero_si256());
@@ -780,9 +779,13 @@ unsafe fn solve_NTRU_intermediate(logn_top: u32,
 
 // Solving the NTRU equation, top-level.
 #[target_feature(enable = "avx2")]
-unsafe fn solve_NTRU_depth0(logn: u32,
-    f: &[i8], g: &[i8], tmp_u32: &mut [u32], tmp_fxr: &mut [FXR]) -> bool
-{
+unsafe fn solve_NTRU_depth0(
+    logn: u32,
+    f: &[i8],
+    g: &[i8],
+    tmp_u32: &mut [u32],
+    tmp_fxr: &mut [FXR],
+) -> bool {
     let n = 1usize << logn;
     let hn = n >> 1;
 
@@ -962,7 +965,9 @@ unsafe fn solve_NTRU_depth0(logn: u32,
             Gp[i] = mp_sub(Gp[i], mp_mmul(kv, t3[i], p, p0i), p);
             let x = mp_sub(
                 mp_mmul(t2[i], Gp[i], p, p0i),
-                mp_mmul(t3[i], Fp[i], p, p0i), p);
+                mp_mmul(t3[i], Fp[i], p, p0i),
+                p,
+            );
             if x != rv {
                 return false;
             }
@@ -988,7 +993,7 @@ unsafe fn make_fg_depth0(logn: u32, f: &[i8], g: &[i8], tmp: &mut [u32]) {
     let p0i = P0.p0i;
     let (ft, tmp) = tmp.split_at_mut(n);
     let (gt, tmp) = tmp.split_at_mut(n);
-    let (gm, _)   = tmp.split_at_mut(n);
+    let (gm, _) = tmp.split_at_mut(n);
     poly_mp_set_small(logn, f, p, ft);
     poly_mp_set_small(logn, g, p, gt);
     mp_mkgm(logn, P0.g, p, p0i, gm);
@@ -1032,10 +1037,16 @@ unsafe fn make_fg_step(logn_top: u32, depth: u32, work: &mut [u32]) {
             for j in 0..hn {
                 fd[kd + j] = mp_mmul(
                     mp_mmul(fs[ks + 2 * j], fs[ks + 2 * j + 1], p, p0i),
-                    R2, p, p0i);
+                    R2,
+                    p,
+                    p0i,
+                );
                 gd[kd + j] = mp_mmul(
                     mp_mmul(gs[ks + 2 * j], gs[ks + 2 * j + 1], p, p0i),
-                    R2, p, p0i);
+                    R2,
+                    p,
+                    p0i,
+                );
             }
             mp_mkigm(logn, PRIMES[i].ig, p, p0i, igm);
             mp_iNTT(logn, &mut fs[ks..], igm, p, p0i);
@@ -1070,7 +1081,14 @@ unsafe fn make_fg_step(logn_top: u32, depth: u32, work: &mut [u32]) {
                     let t2p: *mut __m256i = transmute(t2.as_mut_ptr());
                     for j in 0..(n >> 3) {
                         let yt = zint_mod_small_signed_x8(
-                            fsp.wrapping_add(j), slen, n, yp, yp0i, yR2, yRx);
+                            fsp.wrapping_add(j),
+                            slen,
+                            n,
+                            yp,
+                            yp0i,
+                            yR2,
+                            yRx,
+                        );
                         _mm256_storeu_si256(t2p.wrapping_add(j), yt);
                     }
                 }
@@ -1081,13 +1099,11 @@ unsafe fn make_fg_step(logn_top: u32, depth: u32, work: &mut [u32]) {
                     let fdp = fdp.wrapping_add(kd >> 2);
                     for j in 0..(hn >> 2) {
                         let yt = _mm256_loadu_si256(t2p.wrapping_add(j));
-                        let yt = mp_mmul_x4(yt,
-                            _mm256_srli_epi64(yt, 32), yp, yp0i);
+                        let yt = mp_mmul_x4(yt, _mm256_srli_epi64(yt, 32), yp, yp0i);
                         let yt = mp_mmul_x4(yt, yR2, yp, yp0i);
                         let yt = _mm256_shuffle_epi32(yt, 0xD8);
                         let yt = _mm256_permute4x64_epi64(yt, 0xD8);
-                        _mm_storeu_si128(fdp.wrapping_add(j),
-                            _mm256_castsi256_si128(yt));
+                        _mm_storeu_si128(fdp.wrapping_add(j), _mm256_castsi256_si128(yt));
                     }
                 }
 
@@ -1095,7 +1111,14 @@ unsafe fn make_fg_step(logn_top: u32, depth: u32, work: &mut [u32]) {
                     let t2p: *mut __m256i = transmute(t2.as_mut_ptr());
                     for j in 0..(n >> 3) {
                         let yt = zint_mod_small_signed_x8(
-                            gsp.wrapping_add(j), slen, n, yp, yp0i, yR2, yRx);
+                            gsp.wrapping_add(j),
+                            slen,
+                            n,
+                            yp,
+                            yp0i,
+                            yR2,
+                            yRx,
+                        );
                         _mm256_storeu_si256(t2p.wrapping_add(j), yt);
                     }
                 }
@@ -1106,36 +1129,28 @@ unsafe fn make_fg_step(logn_top: u32, depth: u32, work: &mut [u32]) {
                     let gdp = gdp.wrapping_add(kd >> 2);
                     for j in 0..(hn >> 2) {
                         let yt = _mm256_loadu_si256(t2p.wrapping_add(j));
-                        let yt = mp_mmul_x4(yt,
-                            _mm256_srli_epi64(yt, 32), yp, yp0i);
+                        let yt = mp_mmul_x4(yt, _mm256_srli_epi64(yt, 32), yp, yp0i);
                         let yt = mp_mmul_x4(yt, yR2, yp, yp0i);
                         let yt = _mm256_shuffle_epi32(yt, 0xD8);
                         let yt = _mm256_permute4x64_epi64(yt, 0xD8);
-                        _mm_storeu_si128(gdp.wrapping_add(j),
-                            _mm256_castsi256_si128(yt));
+                        _mm_storeu_si128(gdp.wrapping_add(j), _mm256_castsi256_si128(yt));
                     }
                 }
             } else {
                 for j in 0..n {
-                    t2[j] = zint_mod_small_signed(
-                        &fs[j..], slen, n, p, p0i, R2, Rx);
+                    t2[j] = zint_mod_small_signed(&fs[j..], slen, n, p, p0i, R2, Rx);
                 }
                 mp_NTT(logn, t2, gm, p, p0i);
                 for j in 0..hn {
-                    fd[kd + j] = mp_mmul(
-                        mp_mmul(t2[2 * j], t2[2 * j + 1], p, p0i),
-                        R2, p, p0i);
+                    fd[kd + j] = mp_mmul(mp_mmul(t2[2 * j], t2[2 * j + 1], p, p0i), R2, p, p0i);
                 }
 
                 for j in 0..n {
-                    t2[j] = zint_mod_small_signed(
-                        &gs[j..], slen, n, p, p0i, R2, Rx);
+                    t2[j] = zint_mod_small_signed(&gs[j..], slen, n, p, p0i, R2, Rx);
                 }
                 mp_NTT(logn, t2, gm, p, p0i);
                 for j in 0..hn {
-                    gd[kd + j] = mp_mmul(
-                        mp_mmul(t2[2 * j], t2[2 * j + 1], p, p0i),
-                        R2, p, p0i);
+                    gd[kd + j] = mp_mmul(mp_mmul(t2[2 * j], t2[2 * j + 1], p, p0i), R2, p, p0i);
                 }
             }
         }
@@ -1144,9 +1159,7 @@ unsafe fn make_fg_step(logn_top: u32, depth: u32, work: &mut [u32]) {
 
 // Recompute (f,g) at a given depth.
 #[target_feature(enable = "avx2")]
-unsafe fn make_fg_intermediate(logn_top: u32,
-    f: &[i8], g: &[i8], depth: u32, work: &mut [u32])
-{
+unsafe fn make_fg_intermediate(logn_top: u32, f: &[i8], g: &[i8], depth: u32, work: &mut [u32]) {
     make_fg_depth0(logn_top, f, g, work);
     for d in 0..depth {
         make_fg_step(logn_top, d, work);
@@ -1161,9 +1174,7 @@ unsafe fn make_fg_intermediate(logn_top: u32,
 // computed); otherwise, this function returns true. There is no such
 // test on g.
 #[target_feature(enable = "avx2")]
-unsafe fn make_fg_deepest(logn: u32, f: &[i8], g: &[i8], mut work: &mut [u32])
-    -> bool
-{
+unsafe fn make_fg_deepest(logn: u32, f: &[i8], g: &[i8], mut work: &mut [u32]) -> bool {
     make_fg_depth0(logn, f, g, work);
 
     // f is now in RNS+NTT; we can test its invertibility by checking

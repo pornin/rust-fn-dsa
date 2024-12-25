@@ -287,7 +287,14 @@ code as a dependency (especially since some of the unit tests in the key
 pair generation and signature generation can be somewhat expensive to
 run).
 
-An example usage code looks as follows:
+### Example
+* Add Dependency to Cargo.toml:
+```toml
+fn-dsa = "0.2.0"
+rand_core = "0.6"
+```
+
+* An example usage code looks as follows:
 
 ```rust
 use rand_core::OsRng;

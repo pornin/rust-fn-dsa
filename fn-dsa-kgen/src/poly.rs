@@ -5,9 +5,9 @@ use super::fxp::*;
 use super::mp31::*;
 use super::zint31::*;
 
-// ======================================================================== 
+// ========================================================================
 // Operations on polynomials modulo X^n+1
-// ======================================================================== 
+// ========================================================================
 
 // Compute the roots for NTT and inverse NTT.
 // Inputs:
@@ -19,9 +19,15 @@ use super::zint31::*;
 // Outputs are written into gm[] and igm[]; in both slices, exactly
 // n = 2^logn values are written. Output values are in Montgomery
 // representation.
-pub(crate) fn mp_mkgmigm(logn: u32, g: u32, ig: u32, p: u32, p0i: u32,
-    gm: &mut [u32], igm: &mut [u32])
-{
+pub(crate) fn mp_mkgmigm(
+    logn: u32,
+    g: u32,
+    ig: u32,
+    p: u32,
+    p0i: u32,
+    gm: &mut [u32],
+    igm: &mut [u32],
+) {
     // We want a primitive 2n-th root of 1; we have a primitive 2048-th root
     // of 1, so we must square it a few times if logn < 10.
     let mut g = g;
@@ -218,9 +224,7 @@ pub(crate) const fn divrem31(x: u32) -> (u32, u32) {
 //
 // This function is constant-time with regard to both the coefficient
 // contents and the scaling factor sc.
-pub(crate) fn poly_big_to_fixed(logn: u32,
-    f: &[u32], flen: usize, sc: u32, d: &mut [FXR])
-{
+pub(crate) fn poly_big_to_fixed(logn: u32, f: &[u32], flen: usize, sc: u32, d: &mut [FXR]) {
     let n = 1usize << logn;
 
     if flen == 0 {
@@ -283,9 +287,15 @@ pub(crate) fn poly_big_to_fixed(logn: u32,
 // Subtract f*k*2^scale_k from F. Coefficients of F and f use Flen and flen
 // words, respectively, and are in plain signed representation. Coefficients
 // from k are signed 32-bit integers (provided in u32 slots).
-pub(crate) fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
-    f: &[u32], flen: usize, k: &[u32], sc: u32)
-{
+pub(crate) fn poly_sub_scaled(
+    logn: u32,
+    F: &mut [u32],
+    Flen: usize,
+    f: &[u32],
+    flen: usize,
+    k: &[u32],
+    sc: u32,
+) {
     if flen == 0 {
         return;
     }
@@ -301,13 +311,20 @@ pub(crate) fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
     for i in 0..n {
         let kf = k[i].wrapping_neg() as i32;
         for j in i..n {
-            zint_add_scaled_mul_small(
-                &mut F[j..], Flen, &f[(j - i)..], flen, n, kf, sch, scl);
+            zint_add_scaled_mul_small(&mut F[j..], Flen, &f[(j - i)..], flen, n, kf, sch, scl);
         }
         let kf = kf.wrapping_neg();
         for j in 0..i {
             zint_add_scaled_mul_small(
-                &mut F[j..], Flen, &f[((j + n) - i)..], flen, n, kf, sch, scl);
+                &mut F[j..],
+                Flen,
+                &f[((j + n) - i)..],
+                flen,
+                n,
+                kf,
+                sch,
+                scl,
+            );
         }
     }
 }
@@ -321,9 +338,16 @@ pub(crate) fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
 // The multiplication f*k is internally computed using the NTT; this is
 // faster at large degree.
 // The value of logn MUST be at least 3.
-pub(crate) fn poly_sub_scaled_ntt(logn: u32, F: &mut [u32], Flen: usize,
-    f: &[u32], flen: usize, k: &[u32], sc: u32, tmp: &mut [u32])
-{
+pub(crate) fn poly_sub_scaled_ntt(
+    logn: u32,
+    F: &mut [u32],
+    Flen: usize,
+    f: &[u32],
+    flen: usize,
+    k: &[u32],
+    sc: u32,
+    tmp: &mut [u32],
+) {
     assert!(logn >= 3);
     let n = 1usize << logn;
     let tlen = flen + 1;
@@ -364,10 +388,17 @@ pub(crate) fn poly_sub_scaled_ntt(logn: u32, F: &mut [u32], Flen: usize,
 // is large) but we do not have enough room in our buffers to keep (f,g)
 // in RNS+NTT modulo enough primes. Instead, we recompute them dynamically
 // here.
-pub(crate) fn poly_sub_kfg_scaled_depth1(logn_top: u32,
-    F: &mut [u32], G: &mut [u32], FGlen: usize,
-    k: &mut [u32], sc: u32, f: &[i8], g: &[i8], tmp: &mut [u32])
-{
+pub(crate) fn poly_sub_kfg_scaled_depth1(
+    logn_top: u32,
+    F: &mut [u32],
+    G: &mut [u32],
+    FGlen: usize,
+    k: &mut [u32],
+    sc: u32,
+    f: &[i8],
+    g: &[i8],
+    tmp: &mut [u32],
+) {
     let logn = logn_top - 1;
     let n = 1usize << logn;
     let hn = n >> 1;
@@ -470,17 +501,15 @@ pub(crate) fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let xo0 = t2[(j << 1) + 0];
             let xo1 = t2[(j << 1) + 1];
             let xv0 = gm[j + hn];
-            let xv1 = p - xv0;      // values in gm[] are non-zero
+            let xv1 = p - xv0; // values in gm[] are non-zero
             let xe0 = mp_mmul(xe0, xe0, p, p0i);
             let xe1 = mp_mmul(xe1, xe1, p, p0i);
             let xo0 = mp_mmul(xo0, xo0, p, p0i);
             let xo1 = mp_mmul(xo1, xo1, p, p0i);
             let xf0 = mp_sub(xe0, mp_mmul(xo0, xv0, p, p0i), p);
             let xf1 = mp_sub(xe1, mp_mmul(xo1, xv1, p, p0i), p);
-            let xkf0 = mp_mmul(
-                mp_mmul(xf0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
-            let xkf1 = mp_mmul(
-                mp_mmul(xf1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
+            let xkf0 = mp_mmul(mp_mmul(xf0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
+            let xkf1 = mp_mmul(mp_mmul(xf1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
             Fu[(j << 1) + 0] = mp_sub(Fu[(j << 1) + 0], xkf0, p);
             Fu[(j << 1) + 1] = mp_sub(Fu[(j << 1) + 1], xkf1, p);
         }
@@ -498,17 +527,15 @@ pub(crate) fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let xo0 = t2[(j << 1) + 0];
             let xo1 = t2[(j << 1) + 1];
             let xv0 = gm[j + hn];
-            let xv1 = p - xv0;      // values in gm[] are non-zero
+            let xv1 = p - xv0; // values in gm[] are non-zero
             let xe0 = mp_mmul(xe0, xe0, p, p0i);
             let xe1 = mp_mmul(xe1, xe1, p, p0i);
             let xo0 = mp_mmul(xo0, xo0, p, p0i);
             let xo1 = mp_mmul(xo1, xo1, p, p0i);
             let xg0 = mp_sub(xe0, mp_mmul(xo0, xv0, p, p0i), p);
             let xg1 = mp_sub(xe1, mp_mmul(xo1, xv1, p, p0i), p);
-            let xkg0 = mp_mmul(
-                mp_mmul(xg0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
-            let xkg1 = mp_mmul(
-                mp_mmul(xg1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
+            let xkg0 = mp_mmul(mp_mmul(xg0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
+            let xkg1 = mp_mmul(mp_mmul(xg1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
             Gu[(j << 1) + 0] = mp_sub(Gu[(j << 1) + 0], xkg0, p);
             Gu[(j << 1) + 1] = mp_sub(Gu[(j << 1) + 1], xkg1, p);
         }
@@ -552,8 +579,7 @@ pub(crate) fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let x0m1 = x0.wrapping_sub(p1 & !tbmask(x0.wrapping_sub(p1)));
             let y = mp_mmul(mp_sub(x1, x0m1, p1), s, p1, p1_0i);
             let z = (x0 as u64) + (p0 as u64) * (y as u64);
-            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63)
-                .wrapping_neg());
+            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63).wrapping_neg());
             F[i] = (z as u32) & 0x7FFFFFFF;
             F[i + n] = ((z >> 31) as u32) & 0x7FFFFFFF;
         }
@@ -563,8 +589,7 @@ pub(crate) fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let x0m1 = x0.wrapping_sub(p1 & !tbmask(x0.wrapping_sub(p1)));
             let y = mp_mmul(mp_sub(x1, x0m1, p1), s, p1, p1_0i);
             let z = (x0 as u64) + (p0 as u64) * (y as u64);
-            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63)
-                .wrapping_neg());
+            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63).wrapping_neg());
             G[i] = (z as u32) & 0x7FFFFFFF;
             G[i + n] = ((z >> 31) as u32) & 0x7FFFFFFF;
         }
@@ -574,7 +599,7 @@ pub(crate) fn poly_sub_kfg_scaled_depth1(logn_top: u32,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     fn inner_NTT(logn: u32, g: u32, ig: u32, p: u32, p0i: u32, R2: u32) {
         let mut tmp = [0u32; 5 * 1024];
@@ -590,8 +615,10 @@ mod tests {
             sh.update((p as u64).to_le_bytes());
             sh.update((i as u16).to_le_bytes());
             let hv = sh.finalize_reset();
-            t1[i] = (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[0..8]).unwrap()) % (p as u64)) as u32;
-            t2[i] = (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[8..16]).unwrap()) % (p as u64)) as u32;
+            t1[i] =
+                (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[0..8]).unwrap()) % (p as u64)) as u32;
+            t2[i] = (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[8..16]).unwrap()) % (p as u64))
+                as u32;
         }
 
         // Compute the product t1*t2 into w3 "manually", then reduce it
@@ -633,9 +660,14 @@ mod tests {
     fn NTT() {
         for logn in 1..11 {
             for i in 0..5 {
-                inner_NTT(logn,
-                    PRIMES[i].g, PRIMES[i].ig,
-                    PRIMES[i].p, PRIMES[i].p0i, PRIMES[i].R2);
+                inner_NTT(
+                    logn,
+                    PRIMES[i].g,
+                    PRIMES[i].ig,
+                    PRIMES[i].p,
+                    PRIMES[i].p0i,
+                    PRIMES[i].R2,
+                );
             }
         }
     }

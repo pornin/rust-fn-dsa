@@ -5,16 +5,16 @@ use super::fxp::*;
 use super::mp31::*;
 use super::zint31_avx2::*;
 
-#[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
 
 use core::mem::transmute;
 
-// ======================================================================== 
+// ========================================================================
 // Operations on polynomials modulo X^n+1 (with AVX2 optimizations)
-// ======================================================================== 
+// ========================================================================
 
 // ------------------------------------------------------------------------
 // Parallel versions of mp31 primitives (x8).
@@ -27,26 +27,20 @@ pub(crate) unsafe fn mp_set_x8(yv: __m256i, yp: __m256i) -> __m256i {
 
 #[target_feature(enable = "avx2")]
 #[inline]
-pub(crate) unsafe fn mp_norm_x8(yv: __m256i, yp: __m256i, yhp: __m256i)
-    -> __m256i
-{
+pub(crate) unsafe fn mp_norm_x8(yv: __m256i, yp: __m256i, yhp: __m256i) -> __m256i {
     _mm256_sub_epi32(yv, _mm256_and_si256(yp, _mm256_cmpgt_epi32(yv, yhp)))
 }
 
 #[target_feature(enable = "avx2")]
 #[inline]
-pub(crate) unsafe fn mp_add_x8(ya: __m256i, yb: __m256i, yp: __m256i)
-    -> __m256i
-{
+pub(crate) unsafe fn mp_add_x8(ya: __m256i, yb: __m256i, yp: __m256i) -> __m256i {
     let yd = _mm256_sub_epi32(_mm256_add_epi32(ya, yb), yp);
     _mm256_add_epi32(yd, _mm256_and_si256(yp, _mm256_srai_epi32(yd, 31)))
 }
 
 #[target_feature(enable = "avx2")]
 #[inline]
-pub(crate) unsafe fn mp_sub_x8(ya: __m256i, yb: __m256i, yp: __m256i)
-    -> __m256i
-{
+pub(crate) unsafe fn mp_sub_x8(ya: __m256i, yb: __m256i, yp: __m256i) -> __m256i {
     let yd = _mm256_sub_epi32(ya, yb);
     _mm256_add_epi32(yd, _mm256_and_si256(yp, _mm256_srai_epi32(yd, 31)))
 }
@@ -55,9 +49,18 @@ pub(crate) unsafe fn mp_sub_x8(ya: __m256i, yb: __m256i, yp: __m256i)
 #[inline]
 pub(crate) unsafe fn mp_half_x8(ya: __m256i, yp: __m256i) -> __m256i {
     _mm256_srli_epi32(
-        _mm256_add_epi32(ya, _mm256_and_si256(yp,
-            _mm256_sub_epi32(_mm256_setzero_si256(),
-                _mm256_and_si256(ya, _mm256_set1_epi32(1))))), 1)
+        _mm256_add_epi32(
+            ya,
+            _mm256_and_si256(
+                yp,
+                _mm256_sub_epi32(
+                    _mm256_setzero_si256(),
+                    _mm256_and_si256(ya, _mm256_set1_epi32(1)),
+                ),
+            ),
+        ),
+        1,
+    )
 }
 
 // Input:
@@ -67,9 +70,7 @@ pub(crate) unsafe fn mp_half_x8(ya: __m256i, yp: __m256i) -> __m256i {
 //    mm(a0,b0) : 00 : mm(a1,b1) : 00 : mm(a2,b2) : 00 : mm(a3,b3) : 00
 #[target_feature(enable = "avx2")]
 #[inline]
-pub(crate) unsafe fn mp_mmul_x4(
-    ya: __m256i, yb: __m256i, yp: __m256i, yp0i: __m256i) -> __m256i
-{
+pub(crate) unsafe fn mp_mmul_x4(ya: __m256i, yb: __m256i, yp: __m256i, yp0i: __m256i) -> __m256i {
     let yd = _mm256_mul_epu32(ya, yb);
     let ye = _mm256_mul_epu32(yd, yp0i);
     let ye = _mm256_mul_epu32(ye, yp);
@@ -80,15 +81,11 @@ pub(crate) unsafe fn mp_mmul_x4(
 
 #[target_feature(enable = "avx2")]
 #[inline]
-pub(crate) unsafe fn mp_mmul_x8(
-    ya: __m256i, yb: __m256i, yp: __m256i, yp0i: __m256i) -> __m256i
-{
+pub(crate) unsafe fn mp_mmul_x8(ya: __m256i, yb: __m256i, yp: __m256i, yp0i: __m256i) -> __m256i {
     // yd0 <- a0*b0 : a2*b2 (+high lane)
     let yd0 = _mm256_mul_epu32(ya, yb);
     // yd1 <- a1*b1 : a3*b3 (+high lane)
-    let yd1 = _mm256_mul_epu32(
-        _mm256_srli_epi64(ya, 32),
-        _mm256_srli_epi64(yb, 32));
+    let yd1 = _mm256_mul_epu32(_mm256_srli_epi64(ya, 32), _mm256_srli_epi64(yb, 32));
 
     let ye0 = _mm256_mul_epu32(yd0, yp0i);
     let ye1 = _mm256_mul_epu32(yd1, yp0i);
@@ -124,9 +121,15 @@ pub(crate) unsafe fn mp_mmul_x8(
 // n = 2^logn values are written. Output values are in Montgomery
 // representation.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn mp_mkgmigm(logn: u32, g: u32, ig: u32, p: u32, p0i: u32,
-    gm: &mut [u32], igm: &mut [u32])
-{
+pub(crate) unsafe fn mp_mkgmigm(
+    logn: u32,
+    g: u32,
+    ig: u32,
+    p: u32,
+    p0i: u32,
+    gm: &mut [u32],
+    igm: &mut [u32],
+) {
     // We want a primitive 2n-th root of 1; we have a primitive 2048-th root
     // of 1, so we must square it a few times if logn < 10.
     let mut g = g;
@@ -153,8 +156,8 @@ pub(crate) unsafe fn mp_mkgmigm(logn: u32, g: u32, ig: u32, p: u32, p0i: u32,
         let a3 = mp_mmul(a5, gx, p, p0i);
         let a7 = mp_mmul(a3, gx, p, p0i);
         let mut ya = _mm256_setr_epi32(
-            a0 as i32, a1 as i32, a2 as i32, a3 as i32,
-            a4 as i32, a5 as i32, a6 as i32, a7 as i32);
+            a0 as i32, a1 as i32, a2 as i32, a3 as i32, a4 as i32, a5 as i32, a6 as i32, a7 as i32,
+        );
         let yg = _mm256_set1_epi32(g as i32);
 
         let mut igx = ig;
@@ -170,8 +173,8 @@ pub(crate) unsafe fn mp_mkgmigm(logn: u32, g: u32, ig: u32, p: u32, p0i: u32,
         let b3 = mp_mmul(b5, igx, p, p0i);
         let b7 = mp_mmul(b3, igx, p, p0i);
         let mut yb = _mm256_setr_epi32(
-            b0 as i32, b1 as i32, b2 as i32, b3 as i32,
-            b4 as i32, b5 as i32, b6 as i32, b7 as i32);
+            b0 as i32, b1 as i32, b2 as i32, b3 as i32, b4 as i32, b5 as i32, b6 as i32, b7 as i32,
+        );
         let yig = _mm256_set1_epi32(ig as i32);
 
         let k = 10 - logn;
@@ -223,8 +226,8 @@ pub(crate) unsafe fn mp_mkgm(logn: u32, g: u32, p: u32, p0i: u32, gm: &mut [u32]
         let a3 = mp_mmul(a5, gx, p, p0i);
         let a7 = mp_mmul(a3, gx, p, p0i);
         let mut ya = _mm256_setr_epi32(
-            a0 as i32, a1 as i32, a2 as i32, a3 as i32,
-            a4 as i32, a5 as i32, a6 as i32, a7 as i32);
+            a0 as i32, a1 as i32, a2 as i32, a3 as i32, a4 as i32, a5 as i32, a6 as i32, a7 as i32,
+        );
         let yg = _mm256_set1_epi32(g as i32);
 
         let k = 10 - logn;
@@ -270,8 +273,8 @@ pub(crate) unsafe fn mp_mkigm(logn: u32, ig: u32, p: u32, p0i: u32, igm: &mut [u
         let b3 = mp_mmul(b5, igx, p, p0i);
         let b7 = mp_mmul(b3, igx, p, p0i);
         let mut yb = _mm256_setr_epi32(
-            b0 as i32, b1 as i32, b2 as i32, b3 as i32,
-            b4 as i32, b5 as i32, b6 as i32, b7 as i32);
+            b0 as i32, b1 as i32, b2 as i32, b3 as i32, b4 as i32, b5 as i32, b6 as i32, b7 as i32,
+        );
         let yig = _mm256_set1_epi32(ig as i32);
 
         let k = 10 - logn;
@@ -296,9 +299,7 @@ pub(crate) unsafe fn mp_mkigm(logn: u32, ig: u32, p: u32, p0i: u32, igm: &mut [u
 
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn NTT8(ya: __m256i, gm: &[u32], k: usize, yp: __m256i, yp0i: __m256i)
-    -> __m256i
-{
+unsafe fn NTT8(ya: __m256i, gm: &[u32], k: usize, yp: __m256i, yp0i: __m256i) -> __m256i {
     // 0/4, 1/5, 2/6, 3/7 with gm[1]
     // ya <- a0:a1:a4:a5:a2:a3:a6:a7
     let ya = _mm256_permute4x64_epi64(ya, 0xD8);
@@ -321,10 +322,15 @@ unsafe fn NTT8(ya: __m256i, gm: &[u32], k: usize, yp: __m256i, yp0i: __m256i)
     let yt1 = _mm256_permute2x128_si256(ya0, ya1, 0x20);
     let yt2 = _mm256_permute2x128_si256(ya0, ya1, 0x31);
     let yg1 = _mm256_setr_epi32(
-        gm[(k << 1) + 0] as i32, gm[(k << 1) + 0] as i32,
-        gm[(k << 1) + 0] as i32, gm[(k << 1) + 0] as i32,
-        gm[(k << 1) + 1] as i32, gm[(k << 1) + 1] as i32,
-        gm[(k << 1) + 1] as i32, gm[(k << 1) + 1] as i32);
+        gm[(k << 1) + 0] as i32,
+        gm[(k << 1) + 0] as i32,
+        gm[(k << 1) + 0] as i32,
+        gm[(k << 1) + 0] as i32,
+        gm[(k << 1) + 1] as i32,
+        gm[(k << 1) + 1] as i32,
+        gm[(k << 1) + 1] as i32,
+        gm[(k << 1) + 1] as i32,
+    );
     let yt2 = mp_mmul_x4(yt2, yg1, yp, yp0i);
     let ya0 = mp_add_x8(yt1, yt2, yp);
     let ya1 = mp_sub_x8(yt1, yt2, yp);
@@ -338,10 +344,15 @@ unsafe fn NTT8(ya: __m256i, gm: &[u32], k: usize, yp: __m256i, yp0i: __m256i)
     let yt1 = _mm256_unpacklo_epi64(ya0, ya1);
     let yt2 = _mm256_unpackhi_epi64(ya0, ya1);
     let yg2 = _mm256_setr_epi32(
-        gm[(k << 2) + 0] as i32, gm[(k << 2) + 0] as i32,
-        gm[(k << 2) + 1] as i32, gm[(k << 2) + 1] as i32,
-        gm[(k << 2) + 2] as i32, gm[(k << 2) + 2] as i32,
-        gm[(k << 2) + 3] as i32, gm[(k << 2) + 3] as i32);
+        gm[(k << 2) + 0] as i32,
+        gm[(k << 2) + 0] as i32,
+        gm[(k << 2) + 1] as i32,
+        gm[(k << 2) + 1] as i32,
+        gm[(k << 2) + 2] as i32,
+        gm[(k << 2) + 2] as i32,
+        gm[(k << 2) + 3] as i32,
+        gm[(k << 2) + 3] as i32,
+    );
     let yt2 = mp_mmul_x4(yt2, yg2, yp, yp0i);
     let ya0 = mp_add_x8(yt1, yt2, yp);
     let ya1 = mp_sub_x8(yt1, yt2, yp);
@@ -358,11 +369,9 @@ unsafe fn NTT8(ya: __m256i, gm: &[u32], k: usize, yp: __m256i, yp0i: __m256i)
 // table must have been initialized with mp_mkgm() (or mp_mkgmigm()) with
 // at least n elements.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn mp_NTT(logn: u32,
-    a: &mut [u32], gm: &[u32], p: u32, p0i: u32)
-{
+pub(crate) unsafe fn mp_NTT(logn: u32, a: &mut [u32], gm: &[u32], p: u32, p0i: u32) {
     match logn {
-        0 => { }
+        0 => {}
         1 => {
             let x1 = a[0];
             let x2 = mp_mmul(a[1], gm[1], p, p0i);
@@ -406,10 +415,8 @@ pub(crate) unsafe fn mp_NTT(logn: u32,
                         let y1 = _mm256_loadu_si256(ap.wrapping_add(j1));
                         let y2 = _mm256_loadu_si256(ap.wrapping_add(j2));
                         let y2 = mp_mmul_x8(y2, ys, yp, yp0i);
-                        _mm256_storeu_si256(ap.wrapping_add(j1),
-                                mp_add_x8(y1, y2, yp));
-                        _mm256_storeu_si256(ap.wrapping_add(j2),
-                                mp_sub_x8(y1, y2, yp));
+                        _mm256_storeu_si256(ap.wrapping_add(j1), mp_add_x8(y1, y2, yp));
+                        _mm256_storeu_si256(ap.wrapping_add(j2), mp_sub_x8(y1, y2, yp));
                     }
                     j0 += t;
                 }
@@ -427,18 +434,21 @@ pub(crate) unsafe fn mp_NTT(logn: u32,
 
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn iNTT8(ya: __m256i, igm: &[u32], k: usize, yp: __m256i, yp0i: __m256i)
-    -> __m256i
-{
+unsafe fn iNTT8(ya: __m256i, igm: &[u32], k: usize, yp: __m256i, yp0i: __m256i) -> __m256i {
     // yt1 <- a0:--:a2:--:a4:--:a6:--
     // yt2 <- a1:--:a3:--:a5:--:a7:--
     let yt1 = ya;
     let yt2 = _mm256_srli_epi64(ya, 32);
     let yg2 = _mm256_setr_epi32(
-        igm[(k << 2) + 0] as i32, igm[(k << 2) + 0] as i32,
-        igm[(k << 2) + 1] as i32, igm[(k << 2) + 1] as i32,
-        igm[(k << 2) + 2] as i32, igm[(k << 2) + 2] as i32,
-        igm[(k << 2) + 3] as i32, igm[(k << 2) + 3] as i32);
+        igm[(k << 2) + 0] as i32,
+        igm[(k << 2) + 0] as i32,
+        igm[(k << 2) + 1] as i32,
+        igm[(k << 2) + 1] as i32,
+        igm[(k << 2) + 2] as i32,
+        igm[(k << 2) + 2] as i32,
+        igm[(k << 2) + 3] as i32,
+        igm[(k << 2) + 3] as i32,
+    );
     let ya0 = mp_half_x8(mp_add_x8(yt1, yt2, yp), yp);
     let ya1 = mp_mmul_x4(mp_sub_x8(yt1, yt2, yp), yg2, yp, yp0i);
 
@@ -447,10 +457,15 @@ unsafe fn iNTT8(ya: __m256i, igm: &[u32], k: usize, yp: __m256i, yp0i: __m256i)
     let yt1 = _mm256_unpacklo_epi64(ya0, ya1);
     let yt2 = _mm256_unpackhi_epi64(ya0, ya1);
     let yg1 = _mm256_setr_epi32(
-        igm[(k << 1) + 0] as i32, igm[(k << 1) + 0] as i32,
-        igm[(k << 1) + 0] as i32, igm[(k << 1) + 0] as i32,
-        igm[(k << 1) + 1] as i32, igm[(k << 1) + 1] as i32,
-        igm[(k << 1) + 1] as i32, igm[(k << 1) + 1] as i32);
+        igm[(k << 1) + 0] as i32,
+        igm[(k << 1) + 0] as i32,
+        igm[(k << 1) + 0] as i32,
+        igm[(k << 1) + 0] as i32,
+        igm[(k << 1) + 1] as i32,
+        igm[(k << 1) + 1] as i32,
+        igm[(k << 1) + 1] as i32,
+        igm[(k << 1) + 1] as i32,
+    );
     let ya0 = mp_half_x8(mp_add_x8(yt1, yt2, yp), yp);
     let ya1 = mp_mmul_x4(mp_sub_x8(yt1, yt2, yp), yg1, yp, yp0i);
 
@@ -478,11 +493,9 @@ unsafe fn iNTT8(ya: __m256i, igm: &[u32], k: usize, yp: __m256i, yp0i: __m256i)
 // 0 <= logn <= 10. The igm[] table must have been initialized with
 // mp_mkigm() (or mp_mkgmigm()) with at least n elements.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn mp_iNTT(logn: u32,
-    a: &mut [u32], igm: &[u32], p: u32, p0i: u32)
-{
+pub(crate) unsafe fn mp_iNTT(logn: u32, a: &mut [u32], igm: &[u32], p: u32, p0i: u32) {
     match logn {
-        0 => { }
+        0 => {}
         1 => {
             let x1 = a[0];
             let x2 = a[1];
@@ -531,10 +544,14 @@ pub(crate) unsafe fn mp_iNTT(logn: u32,
                         let j2 = j1 + t;
                         let y1 = _mm256_loadu_si256(ap.wrapping_add(j1));
                         let y2 = _mm256_loadu_si256(ap.wrapping_add(j2));
-                        _mm256_storeu_si256(ap.wrapping_add(j1),
-                            mp_half_x8(mp_add_x8(y1, y2, yp), yp));
-                        _mm256_storeu_si256(ap.wrapping_add(j2),
-                            mp_mmul_x8(mp_sub_x8(y1, y2, yp), ys, yp, yp0i));
+                        _mm256_storeu_si256(
+                            ap.wrapping_add(j1),
+                            mp_half_x8(mp_add_x8(y1, y2, yp), yp),
+                        );
+                        _mm256_storeu_si256(
+                            ap.wrapping_add(j2),
+                            mp_mmul_x8(mp_sub_x8(y1, y2, yp), ys, yp, yp0i),
+                        );
                     }
                     j0 += dt;
                 }
@@ -579,8 +596,7 @@ pub(crate) unsafe fn poly_mp_set(logn: u32, f: &mut [u32], p: u32) {
         let yt = _mm256_set1_epi32(0x3FFFFFFF);
         for i in 0..(1usize << (logn - 3)) {
             let yf = _mm256_loadu_si256(fp.wrapping_add(i));
-            let yf = _mm256_add_epi32(yf,
-                _mm256_and_si256(yps, _mm256_cmpgt_epi32(yf, yt)));
+            let yf = _mm256_add_epi32(yf, _mm256_and_si256(yps, _mm256_cmpgt_epi32(yf, yt)));
             _mm256_storeu_si256(fp.wrapping_add(i), yf);
         }
     } else {
@@ -670,9 +686,7 @@ pub(crate) const fn divrem31(x: u32) -> (u32, u32) {
 // This function is constant-time with regard to both the coefficient
 // contents and the scaling factor sc.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_big_to_fixed(logn: u32,
-    f: &[u32], flen: usize, sc: u32, d: &mut [FXR])
-{
+pub(crate) unsafe fn poly_big_to_fixed(logn: u32, f: &[u32], flen: usize, sc: u32, d: &mut [FXR]) {
     let n = 1usize << logn;
 
     if flen == 0 {
@@ -736,9 +750,15 @@ pub(crate) unsafe fn poly_big_to_fixed(logn: u32,
 // words, respectively, and are in plain signed representation. Coefficients
 // from k are signed 32-bit integers (provided in u32 slots).
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
-    f: &[u32], flen: usize, k: &[u32], sc: u32)
-{
+pub(crate) unsafe fn poly_sub_scaled(
+    logn: u32,
+    F: &mut [u32],
+    Flen: usize,
+    f: &[u32],
+    flen: usize,
+    k: &[u32],
+    sc: u32,
+) {
     if flen == 0 {
         return;
     }
@@ -778,12 +798,10 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
 
                 let F0 = F[Foff + (i << 1) + 0];
                 let F1 = F[Foff + (i << 1) + 1];
-                let z0 = (F0 as i64) + cc0
-                    - (fs0 as i64) * (k0 as i64)
-                    + (fs1 as i64) * (k1 as i64);
-                let z1 = (F1 as i64) + cc1
-                    - (fs0 as i64) * (k1 as i64)
-                    - (fs1 as i64) * (k0 as i64);
+                let z0 =
+                    (F0 as i64) + cc0 - (fs0 as i64) * (k0 as i64) + (fs1 as i64) * (k1 as i64);
+                let z1 =
+                    (F1 as i64) + cc1 - (fs0 as i64) * (k1 as i64) - (fs1 as i64) * (k0 as i64);
                 F[Foff + (i << 1) + 0] = (z0 as u32) & 0x7FFFFFFF;
                 F[Foff + (i << 1) + 1] = (z1 as u32) & 0x7FFFFFFF;
                 cc0 = z0 >> 31;
@@ -799,8 +817,7 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
 
             let mut xt = _mm_setzero_si128();
             let xsignf = _mm_loadu_si128(fp.wrapping_add(flen - 1));
-            let xsignf = _mm_srli_epi32(
-                _mm_srai_epi32(_mm_slli_epi32(xsignf, 1), 31), 1);
+            let xsignf = _mm_srli_epi32(_mm_srai_epi32(_mm_slli_epi32(xsignf, 1), 31), 1);
             let k0 = k[0] as i32;
             let k1 = k[1] as i32;
             let k2 = k[2] as i32;
@@ -810,9 +827,9 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
             let nk2 = k2.wrapping_neg();
             let nk3 = k3.wrapping_neg();
             let yk0 = _mm256_setr_epi32(nk0, 0, nk1, 0, nk2, 0, nk3, 0);
-            let yk1 = _mm256_setr_epi32( k3, 0, nk0, 0, nk1, 0, nk2, 0);
-            let yk2 = _mm256_setr_epi32( k2, 0,  k3, 0, nk0, 0, nk1, 0);
-            let yk3 = _mm256_setr_epi32( k1, 0,  k2, 0,  k3, 0, nk0, 0);
+            let yk1 = _mm256_setr_epi32(k3, 0, nk0, 0, nk1, 0, nk2, 0);
+            let yk2 = _mm256_setr_epi32(k2, 0, k3, 0, nk0, 0, nk1, 0);
+            let yk3 = _mm256_setr_epi32(k1, 0, k2, 0, k3, 0, nk0, 0);
             let xscl = _mm_cvtsi32_si128(scl as i32);
             let xnscl = _mm_cvtsi32_si128(31 - (scl as i32));
             let mut ycc = _mm256_setzero_si256();
@@ -827,8 +844,7 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
                 } else {
                     xf = xsignf;
                 }
-                let xfs = _mm_or_si128(xt,
-                    _mm_and_si128(_mm_sll_epi32(xf, xscl), x31));
+                let xfs = _mm_or_si128(xt, _mm_and_si128(_mm_sll_epi32(xf, xscl), x31));
                 xt = _mm_srl_epi32(xf, xnscl);
 
                 let yfs0 = _mm256_broadcastd_epi32(xfs);
@@ -836,10 +852,8 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
                 let yfs2 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs, 8));
                 let yfs3 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs, 12));
 
-                let yF = _mm256_castsi128_si256(
-                    _mm_loadu_si128(Fp.wrapping_add(i)));
-                let yF = _mm256_shuffle_epi32(
-                    _mm256_permute4x64_epi64(yF, 0x10), 0x10);
+                let yF = _mm256_castsi128_si256(_mm_loadu_si128(Fp.wrapping_add(i)));
+                let yF = _mm256_shuffle_epi32(_mm256_permute4x64_epi64(yF, 0x10), 0x10);
                 let yF = _mm256_and_si256(yF, y31lo);
 
                 let yv0 = _mm256_mul_epi32(yfs0, yk0);
@@ -847,15 +861,12 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
                 let yv2 = _mm256_mul_epi32(yfs2, yk2);
                 let yv3 = _mm256_mul_epi32(yfs3, yk3);
                 let yz = _mm256_add_epi64(
-                    _mm256_add_epi64(
-                        _mm256_add_epi64(yv0, yv1),
-                        _mm256_add_epi64(yv2, yv3)),
-                    _mm256_add_epi64(ycc, yF));
-                ycc = _mm256_blend_epi32(
-                    _mm256_srli_epi64(yz, 31),
-                    _mm256_srai_epi32(yz, 31), 0xAA);
-                let yz = _mm256_shuffle_epi32(
-                    _mm256_and_si256(yz, y31), 0x88);
+                    _mm256_add_epi64(_mm256_add_epi64(yv0, yv1), _mm256_add_epi64(yv2, yv3)),
+                    _mm256_add_epi64(ycc, yF),
+                );
+                ycc =
+                    _mm256_blend_epi32(_mm256_srli_epi64(yz, 31), _mm256_srai_epi32(yz, 31), 0xAA);
+                let yz = _mm256_shuffle_epi32(_mm256_and_si256(yz, y31), 0x88);
                 let yz = _mm256_permute4x64_epi64(yz, 0x88);
                 let xF = _mm256_castsi256_si128(yz);
                 _mm_storeu_si128(Fp.wrapping_add(i), xF);
@@ -870,8 +881,7 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
 
             let mut yt = _mm256_setzero_si256();
             let ysignf = _mm256_loadu_si256(fp.wrapping_add(flen - 1));
-            let ysignf = _mm256_srli_epi32(
-                _mm256_srai_epi32(_mm256_slli_epi32(ysignf, 1), 31), 1);
+            let ysignf = _mm256_srli_epi32(_mm256_srai_epi32(_mm256_slli_epi32(ysignf, 1), 31), 1);
 
             let k0 = k[0] as i32;
             let k1 = k[1] as i32;
@@ -889,22 +899,14 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
             let nk5 = k5.wrapping_neg();
             let nk6 = k6.wrapping_neg();
             let nk7 = k7.wrapping_neg();
-            let yk0l = _mm256_setr_epi32(
-                nk0, nk1, nk2, nk3, nk4, nk5, nk6, nk7);
-            let yk1l = _mm256_setr_epi32(
-                 k7, nk0, nk1, nk2, nk3, nk4, nk5, nk6);
-            let yk2l = _mm256_setr_epi32(
-                 k6,  k7, nk0, nk1, nk2, nk3, nk4, nk5);
-            let yk3l = _mm256_setr_epi32(
-                 k5,  k6,  k7, nk0, nk1, nk2, nk3, nk4);
-            let yk4l = _mm256_setr_epi32(
-                 k4,  k5,  k6,  k7, nk0, nk1, nk2, nk3);
-            let yk5l = _mm256_setr_epi32(
-                 k3,  k4,  k5,  k6,  k7, nk0, nk1, nk2);
-            let yk6l = _mm256_setr_epi32(
-                 k2,  k3,  k4,  k5,  k6,  k7, nk0, nk1);
-            let yk7l = _mm256_setr_epi32(
-                 k1,  k2,  k3,  k4,  k5,  k6,  k7, nk0);
+            let yk0l = _mm256_setr_epi32(nk0, nk1, nk2, nk3, nk4, nk5, nk6, nk7);
+            let yk1l = _mm256_setr_epi32(k7, nk0, nk1, nk2, nk3, nk4, nk5, nk6);
+            let yk2l = _mm256_setr_epi32(k6, k7, nk0, nk1, nk2, nk3, nk4, nk5);
+            let yk3l = _mm256_setr_epi32(k5, k6, k7, nk0, nk1, nk2, nk3, nk4);
+            let yk4l = _mm256_setr_epi32(k4, k5, k6, k7, nk0, nk1, nk2, nk3);
+            let yk5l = _mm256_setr_epi32(k3, k4, k5, k6, k7, nk0, nk1, nk2);
+            let yk6l = _mm256_setr_epi32(k2, k3, k4, k5, k6, k7, nk0, nk1);
+            let yk7l = _mm256_setr_epi32(k1, k2, k3, k4, k5, k6, k7, nk0);
             let yk0h = _mm256_srli_epi64(yk0l, 32);
             let yk1h = _mm256_srli_epi64(yk1l, 32);
             let yk2h = _mm256_srli_epi64(yk2l, 32);
@@ -921,84 +923,89 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
             let y31 = _mm256_set1_epi32(0x7FFFFFFF);
             let y31lo = _mm256_set1_epi64x(0x7FFFFFFF);
             for i in 0..Flen {
-                    // Next word, shifted.
-                    let yf;
-                    if i < flen {
-                        yf = _mm256_loadu_si256(fp.wrapping_add(i));
-                    } else {
-                        yf = ysignf;
-                    }
-                    let yfs = _mm256_or_si256(yt,
-                        _mm256_and_si256(_mm256_sll_epi32(yf, xscl), y31));
-                    yt = _mm256_srl_epi32(yf, xnscl);
+                // Next word, shifted.
+                let yf;
+                if i < flen {
+                    yf = _mm256_loadu_si256(fp.wrapping_add(i));
+                } else {
+                    yf = ysignf;
+                }
+                let yfs = _mm256_or_si256(yt, _mm256_and_si256(_mm256_sll_epi32(yf, xscl), y31));
+                yt = _mm256_srl_epi32(yf, xnscl);
 
-                    let xfs0 = _mm256_castsi256_si128(yfs);
-                    let xfs1 = _mm256_extracti128_si256(yfs, 1);
-                    let yfs0 = _mm256_broadcastd_epi32(xfs0);
-                    let yfs1 = _mm256_broadcastd_epi32(
-                        _mm_bsrli_si128(xfs0, 4));
-                    let yfs2 = _mm256_broadcastd_epi32(
-                        _mm_bsrli_si128(xfs0, 8));
-                    let yfs3 = _mm256_broadcastd_epi32(
-                        _mm_bsrli_si128(xfs0, 12));
-                    let yfs4 = _mm256_broadcastd_epi32(xfs1);
-                    let yfs5 = _mm256_broadcastd_epi32(
-                        _mm_bsrli_si128(xfs1, 4));
-                    let yfs6 = _mm256_broadcastd_epi32(
-                        _mm_bsrli_si128(xfs1, 8));
-                    let yfs7 = _mm256_broadcastd_epi32(
-                        _mm_bsrli_si128(xfs1, 12));
+                let xfs0 = _mm256_castsi256_si128(yfs);
+                let xfs1 = _mm256_extracti128_si256(yfs, 1);
+                let yfs0 = _mm256_broadcastd_epi32(xfs0);
+                let yfs1 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs0, 4));
+                let yfs2 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs0, 8));
+                let yfs3 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs0, 12));
+                let yfs4 = _mm256_broadcastd_epi32(xfs1);
+                let yfs5 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs1, 4));
+                let yfs6 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs1, 8));
+                let yfs7 = _mm256_broadcastd_epi32(_mm_bsrli_si128(xfs1, 12));
 
-                    let yF = _mm256_loadu_si256(Fp.wrapping_add(i));
-                    let yF0 = _mm256_and_si256(yF, y31lo);
-                    let yF1 = _mm256_srli_epi64(yF, 32);
+                let yF = _mm256_loadu_si256(Fp.wrapping_add(i));
+                let yF0 = _mm256_and_si256(yF, y31lo);
+                let yF1 = _mm256_srli_epi64(yF, 32);
 
-                    let yv0l = _mm256_mul_epi32(yfs0, yk0l);
-                    let yv0h = _mm256_mul_epi32(yfs0, yk0h);
-                    let yv1l = _mm256_mul_epi32(yfs1, yk1l);
-                    let yv1h = _mm256_mul_epi32(yfs1, yk1h);
-                    let yv2l = _mm256_mul_epi32(yfs2, yk2l);
-                    let yv2h = _mm256_mul_epi32(yfs2, yk2h);
-                    let yv3l = _mm256_mul_epi32(yfs3, yk3l);
-                    let yv3h = _mm256_mul_epi32(yfs3, yk3h);
-                    let yv4l = _mm256_mul_epi32(yfs4, yk4l);
-                    let yv4h = _mm256_mul_epi32(yfs4, yk4h);
-                    let yv5l = _mm256_mul_epi32(yfs5, yk5l);
-                    let yv5h = _mm256_mul_epi32(yfs5, yk5h);
-                    let yv6l = _mm256_mul_epi32(yfs6, yk6l);
-                    let yv6h = _mm256_mul_epi32(yfs6, yk6h);
-                    let yv7l = _mm256_mul_epi32(yfs7, yk7l);
-                    let yv7h = _mm256_mul_epi32(yfs7, yk7h);
+                let yv0l = _mm256_mul_epi32(yfs0, yk0l);
+                let yv0h = _mm256_mul_epi32(yfs0, yk0h);
+                let yv1l = _mm256_mul_epi32(yfs1, yk1l);
+                let yv1h = _mm256_mul_epi32(yfs1, yk1h);
+                let yv2l = _mm256_mul_epi32(yfs2, yk2l);
+                let yv2h = _mm256_mul_epi32(yfs2, yk2h);
+                let yv3l = _mm256_mul_epi32(yfs3, yk3l);
+                let yv3h = _mm256_mul_epi32(yfs3, yk3h);
+                let yv4l = _mm256_mul_epi32(yfs4, yk4l);
+                let yv4h = _mm256_mul_epi32(yfs4, yk4h);
+                let yv5l = _mm256_mul_epi32(yfs5, yk5l);
+                let yv5h = _mm256_mul_epi32(yfs5, yk5h);
+                let yv6l = _mm256_mul_epi32(yfs6, yk6l);
+                let yv6h = _mm256_mul_epi32(yfs6, yk6h);
+                let yv7l = _mm256_mul_epi32(yfs7, yk7l);
+                let yv7h = _mm256_mul_epi32(yfs7, yk7h);
 
-                    let yz0 = _mm256_add_epi64(
-                        _mm256_add_epi64(ycc0, yF0),
+                let yz0 = _mm256_add_epi64(
+                    _mm256_add_epi64(ycc0, yF0),
+                    _mm256_add_epi64(
                         _mm256_add_epi64(
-                            _mm256_add_epi64(
-                                _mm256_add_epi64(yv0l, yv1l),
-                                _mm256_add_epi64(yv2l, yv3l)),
-                            _mm256_add_epi64(
-                                _mm256_add_epi64(yv4l, yv5l),
-                                _mm256_add_epi64(yv6l, yv7l))));
-                    let yz1 = _mm256_add_epi64(
-                        _mm256_add_epi64(ycc1, yF1),
+                            _mm256_add_epi64(yv0l, yv1l),
+                            _mm256_add_epi64(yv2l, yv3l),
+                        ),
                         _mm256_add_epi64(
-                            _mm256_add_epi64(
-                                _mm256_add_epi64(yv0h, yv1h),
-                                _mm256_add_epi64(yv2h, yv3h)),
-                            _mm256_add_epi64(
-                                _mm256_add_epi64(yv4h, yv5h),
-                                _mm256_add_epi64(yv6h, yv7h))));
-                    ycc0 = _mm256_blend_epi32(
-                        _mm256_srli_epi64(yz0, 31),
-                        _mm256_srai_epi32(yz0, 31), 0xAA);
-                    ycc1 = _mm256_blend_epi32(
-                        _mm256_srli_epi64(yz1, 31),
-                        _mm256_srai_epi32(yz1, 31), 0xAA);
-                    let yF = _mm256_or_si256(
-                        _mm256_and_si256(yz0, y31lo),
-                        _mm256_slli_epi64(
-                            _mm256_and_si256(yz1, y31lo), 32));
-                    _mm256_storeu_si256(Fp.wrapping_add(i), yF);
+                            _mm256_add_epi64(yv4l, yv5l),
+                            _mm256_add_epi64(yv6l, yv7l),
+                        ),
+                    ),
+                );
+                let yz1 = _mm256_add_epi64(
+                    _mm256_add_epi64(ycc1, yF1),
+                    _mm256_add_epi64(
+                        _mm256_add_epi64(
+                            _mm256_add_epi64(yv0h, yv1h),
+                            _mm256_add_epi64(yv2h, yv3h),
+                        ),
+                        _mm256_add_epi64(
+                            _mm256_add_epi64(yv4h, yv5h),
+                            _mm256_add_epi64(yv6h, yv7h),
+                        ),
+                    ),
+                );
+                ycc0 = _mm256_blend_epi32(
+                    _mm256_srli_epi64(yz0, 31),
+                    _mm256_srai_epi32(yz0, 31),
+                    0xAA,
+                );
+                ycc1 = _mm256_blend_epi32(
+                    _mm256_srli_epi64(yz1, 31),
+                    _mm256_srai_epi32(yz1, 31),
+                    0xAA,
+                );
+                let yF = _mm256_or_si256(
+                    _mm256_and_si256(yz0, y31lo),
+                    _mm256_slli_epi64(_mm256_and_si256(yz1, y31lo), 32),
+                );
+                _mm256_storeu_si256(Fp.wrapping_add(i), yF);
             }
         }
 
@@ -1008,14 +1015,28 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
                 let kf = k[i].wrapping_neg() as i32;
                 for j in i..n {
                     zint_add_scaled_mul_small(
-                        &mut F[j..], Flen,
-                        &f[(j - i)..], flen, n, kf, sch, scl);
+                        &mut F[j..],
+                        Flen,
+                        &f[(j - i)..],
+                        flen,
+                        n,
+                        kf,
+                        sch,
+                        scl,
+                    );
                 }
                 let kf = kf.wrapping_neg();
                 for j in 0..i {
                     zint_add_scaled_mul_small(
-                        &mut F[j..], Flen,
-                        &f[((j + n) - i)..], flen, n, kf, sch, scl);
+                        &mut F[j..],
+                        Flen,
+                        &f[((j + n) - i)..],
+                        flen,
+                        n,
+                        kf,
+                        sch,
+                        scl,
+                    );
                 }
             }
         }
@@ -1032,9 +1053,16 @@ pub(crate) unsafe fn poly_sub_scaled(logn: u32, F: &mut [u32], Flen: usize,
 // faster at large degree.
 // The value of logn MUST be at least 3.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_sub_scaled_ntt(logn: u32, F: &mut [u32], Flen: usize,
-    f: &[u32], flen: usize, k: &[u32], sc: u32, tmp: &mut [u32])
-{
+pub(crate) unsafe fn poly_sub_scaled_ntt(
+    logn: u32,
+    F: &mut [u32],
+    Flen: usize,
+    f: &[u32],
+    flen: usize,
+    k: &[u32],
+    sc: u32,
+    tmp: &mut [u32],
+) {
     assert!(logn >= 3);
     let n = 1usize << logn;
     let tlen = flen + 1;
@@ -1091,10 +1119,17 @@ pub(crate) unsafe fn poly_sub_scaled_ntt(logn: u32, F: &mut [u32], Flen: usize,
 // in RNS+NTT modulo enough primes. Instead, we recompute them dynamically
 // here.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
-    F: &mut [u32], G: &mut [u32], FGlen: usize,
-    k: &mut [u32], sc: u32, f: &[i8], g: &[i8], tmp: &mut [u32])
-{
+pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(
+    logn_top: u32,
+    F: &mut [u32],
+    G: &mut [u32],
+    FGlen: usize,
+    k: &mut [u32],
+    sc: u32,
+    f: &[i8],
+    g: &[i8],
+    tmp: &mut [u32],
+) {
     let logn = logn_top - 1;
     let n = 1usize << logn;
     let hn = n >> 1;
@@ -1197,17 +1232,15 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let xo0 = t2[(j << 1) + 0];
             let xo1 = t2[(j << 1) + 1];
             let xv0 = gm[j + hn];
-            let xv1 = p - xv0;      // values in gm[] are non-zero
+            let xv1 = p - xv0; // values in gm[] are non-zero
             let xe0 = mp_mmul(xe0, xe0, p, p0i);
             let xe1 = mp_mmul(xe1, xe1, p, p0i);
             let xo0 = mp_mmul(xo0, xo0, p, p0i);
             let xo1 = mp_mmul(xo1, xo1, p, p0i);
             let xf0 = mp_sub(xe0, mp_mmul(xo0, xv0, p, p0i), p);
             let xf1 = mp_sub(xe1, mp_mmul(xo1, xv1, p, p0i), p);
-            let xkf0 = mp_mmul(
-                mp_mmul(xf0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
-            let xkf1 = mp_mmul(
-                mp_mmul(xf1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
+            let xkf0 = mp_mmul(mp_mmul(xf0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
+            let xkf1 = mp_mmul(mp_mmul(xf1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
             Fu[(j << 1) + 0] = mp_sub(Fu[(j << 1) + 0], xkf0, p);
             Fu[(j << 1) + 1] = mp_sub(Fu[(j << 1) + 1], xkf1, p);
         }
@@ -1225,17 +1258,15 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let xo0 = t2[(j << 1) + 0];
             let xo1 = t2[(j << 1) + 1];
             let xv0 = gm[j + hn];
-            let xv1 = p - xv0;      // values in gm[] are non-zero
+            let xv1 = p - xv0; // values in gm[] are non-zero
             let xe0 = mp_mmul(xe0, xe0, p, p0i);
             let xe1 = mp_mmul(xe1, xe1, p, p0i);
             let xo0 = mp_mmul(xo0, xo0, p, p0i);
             let xo1 = mp_mmul(xo1, xo1, p, p0i);
             let xg0 = mp_sub(xe0, mp_mmul(xo0, xv0, p, p0i), p);
             let xg1 = mp_sub(xe1, mp_mmul(xo1, xv1, p, p0i), p);
-            let xkg0 = mp_mmul(
-                mp_mmul(xg0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
-            let xkg1 = mp_mmul(
-                mp_mmul(xg1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
+            let xkg0 = mp_mmul(mp_mmul(xg0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
+            let xkg1 = mp_mmul(mp_mmul(xg1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
             Gu[(j << 1) + 0] = mp_sub(Gu[(j << 1) + 0], xkg0, p);
             Gu[(j << 1) + 1] = mp_sub(Gu[(j << 1) + 1], xkg1, p);
         }
@@ -1279,8 +1310,7 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let x0m1 = x0.wrapping_sub(p1 & !tbmask(x0.wrapping_sub(p1)));
             let y = mp_mmul(mp_sub(x1, x0m1, p1), s, p1, p1_0i);
             let z = (x0 as u64) + (p0 as u64) * (y as u64);
-            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63)
-                .wrapping_neg());
+            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63).wrapping_neg());
             F[i] = (z as u32) & 0x7FFFFFFF;
             F[i + n] = ((z >> 31) as u32) & 0x7FFFFFFF;
         }
@@ -1290,8 +1320,7 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let x0m1 = x0.wrapping_sub(p1 & !tbmask(x0.wrapping_sub(p1)));
             let y = mp_mmul(mp_sub(x1, x0m1, p1), s, p1, p1_0i);
             let z = (x0 as u64) + (p0 as u64) * (y as u64);
-            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63)
-                .wrapping_neg());
+            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63).wrapping_neg());
             G[i] = (z as u32) & 0x7FFFFFFF;
             G[i + n] = ((z >> 31) as u32) & 0x7FFFFFFF;
         }
@@ -1301,7 +1330,7 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     unsafe fn inner_NTT(logn: u32, g: u32, ig: u32, p: u32, p0i: u32, R2: u32) {
         let mut tmp = [0u32; 5 * 1024];
@@ -1317,8 +1346,10 @@ mod tests {
             sh.update((p as u64).to_le_bytes());
             sh.update((i as u16).to_le_bytes());
             let hv = sh.finalize_reset();
-            t1[i] = (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[0..8]).unwrap()) % (p as u64)) as u32;
-            t2[i] = (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[8..16]).unwrap()) % (p as u64)) as u32;
+            t1[i] =
+                (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[0..8]).unwrap()) % (p as u64)) as u32;
+            t2[i] = (u64::from_le_bytes(*<&[u8; 8]>::try_from(&hv[8..16]).unwrap()) % (p as u64))
+                as u32;
         }
 
         // Compute the product t1*t2 into w3 "manually", then reduce it
@@ -1362,9 +1393,14 @@ mod tests {
             unsafe {
                 for logn in 1..11 {
                     for i in 0..5 {
-                        inner_NTT(logn,
-                            PRIMES[i].g, PRIMES[i].ig,
-                            PRIMES[i].p, PRIMES[i].p0i, PRIMES[i].R2);
+                        inner_NTT(
+                            logn,
+                            PRIMES[i].g,
+                            PRIMES[i].ig,
+                            PRIMES[i].p,
+                            PRIMES[i].p0i,
+                            PRIMES[i].R2,
+                        );
                     }
                 }
             }

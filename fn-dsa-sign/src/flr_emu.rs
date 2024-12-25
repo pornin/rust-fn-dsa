@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
-
 // Depending on the target architecture, some explicit intrisics could be
 // used instead of the functions defined here.
 #![allow(dead_code)]
@@ -27,7 +26,8 @@ pub(crate) struct FLR(u64);
     target_arch = "x86",
     target_arch = "x86_64",
     target_arch = "aarch64",
-    target_arch = "arm64ec"))]
+    target_arch = "arm64ec"
+))]
 #[inline(always)]
 const fn lzcnt_nz(x: u64) -> u32 {
     // We need the "or 1" so that we do not hit the case x == 0, which
@@ -39,11 +39,11 @@ const fn lzcnt_nz(x: u64) -> u32 {
     target_arch = "x86",
     target_arch = "x86_64",
     target_arch = "aarch64",
-    target_arch = "arm64ec")))]
+    target_arch = "arm64ec"
+)))]
 // This implementation computes the number of leading zeros with a
 // dichotomic search.
 const fn lzcnt_nz(x: u64) -> u32 {
-
     // Input: x != 0, len(x) <= 2*n
     // Output: y, c2
     //     y = x or (x >> n) such that y != 0, len(y) <= n
@@ -61,9 +61,9 @@ const fn lzcnt_nz(x: u64) -> u32 {
     let c = m & 32;
 
     let (x, c) = step(x, 16, c);
-    let (x, c) = step(x,  8, c);
-    let (x, c) = step(x,  4, c);
-    let (x, c) = step(x,  2, c);
+    let (x, c) = step(x, 8, c);
+    let (x, c) = step(x, 4, c);
+    let (x, c) = step(x, 2, c);
 
     // At this point, x != 0 and len(x) <= 2, i.e. x \in {1, 2, 3}.
     // We return c is x >= 2, or c + 1 if x = 1.
@@ -90,7 +90,8 @@ const fn norm64(m: u64, e: i32) -> (u64, i32) {
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "arm64ec",
-    target_arch = "riscv64"))]
+    target_arch = "riscv64"
+))]
 #[inline(always)]
 const fn ursh(x: u64, c: u32) -> u64 {
     x >> c
@@ -100,7 +101,8 @@ const fn ursh(x: u64, c: u32) -> u64 {
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "arm64ec",
-    target_arch = "riscv64")))]
+    target_arch = "riscv64"
+)))]
 #[inline(always)]
 const fn ursh(x: u64, n: u32) -> u64 {
     let x = x ^ ((x ^ (x >> 32)) & ((n >> 5) as u64).wrapping_neg());
@@ -111,7 +113,8 @@ const fn ursh(x: u64, n: u32) -> u64 {
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "arm64ec",
-    target_arch = "riscv64"))]
+    target_arch = "riscv64"
+))]
 #[inline(always)]
 const fn ulsh(x: u64, c: u32) -> u64 {
     x << c
@@ -121,7 +124,8 @@ const fn ulsh(x: u64, c: u32) -> u64 {
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "arm64ec",
-    target_arch = "riscv64")))]
+    target_arch = "riscv64"
+)))]
 #[inline(always)]
 const fn ulsh(x: u64, n: u32) -> u64 {
     let x = x ^ ((x ^ (x << 32)) & ((n >> 5) as u64).wrapping_neg());
@@ -132,7 +136,8 @@ const fn ulsh(x: u64, n: u32) -> u64 {
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "arm64ec",
-    target_arch = "riscv64"))]
+    target_arch = "riscv64"
+))]
 #[inline(always)]
 const fn irsh(x: i64, c: u32) -> i64 {
     x >> c
@@ -142,7 +147,8 @@ const fn irsh(x: i64, c: u32) -> i64 {
     target_arch = "x86_64",
     target_arch = "aarch64",
     target_arch = "arm64ec",
-    target_arch = "riscv64")))]
+    target_arch = "riscv64"
+)))]
 #[inline(always)]
 const fn irsh(x: i64, n: u32) -> i64 {
     let x = x ^ ((x ^ (x >> 32)) & ((n >> 5) as i64).wrapping_neg());
@@ -156,7 +162,6 @@ const M63: u64 = 0x7FFFFFFFFFFFFFFF;
 const M52: u64 = 0x000FFFFFFFFFFFFF;
 
 impl FLR {
-
     // IMPLEMENTATION NOTES
     // ====================
     //
@@ -284,7 +289,8 @@ impl FLR {
     pub(crate) fn decode(src: &[u8]) -> Option<Self> {
         match src.len() {
             8 => Some(Self(u64::from_le_bytes(
-                *<&[u8; 8]>::try_from(src).unwrap()))),
+                *<&[u8; 8]>::try_from(src).unwrap(),
+            ))),
             _ => None,
         }
     }
@@ -735,7 +741,8 @@ impl FLR {
             let f = (z0 as u64) * (y0 as u64);
             let a = (z0 as u64) * (y1 as u64) + (f >> 32);
             let b = (z1 as u64) * (y0 as u64);
-            let c = (a >> 32) + (b >> 32)
+            let c = (a >> 32)
+                + (b >> 32)
                 + ((((a as u32) as u64) + ((b as u32) as u64)) >> 32)
                 + (z1 as u64) * (y1 as u64);
             y = Self::EXPM_COEFFS[i].wrapping_sub(c);
@@ -750,7 +757,8 @@ impl FLR {
         let f = (z0 as u64) * (y0 as u64);
         let a = (z0 as u64) * (y1 as u64) + (f >> 32);
         let b = (z1 as u64) * (y0 as u64);
-        let y = (a >> 32) + (b >> 32)
+        let y = (a >> 32)
+            + (b >> 32)
             + ((((a as u32) as u64) + ((b as u32) as u64)) >> 32)
             + (z1 as u64) * (y1 as u64);
         y

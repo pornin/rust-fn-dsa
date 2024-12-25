@@ -15,7 +15,6 @@
 pub(crate) struct FLR(f64);
 
 impl FLR {
-
     pub(crate) const ZERO: Self = Self(0.0);
     pub(crate) const NZERO: Self = Self(-0.0);
     pub(crate) const ONE: Self = Self(1.0);
@@ -331,7 +330,8 @@ impl FLR {
     pub(crate) fn decode(src: &[u8]) -> Option<Self> {
         match src.len() {
             8 => Some(Self(f64::from_le_bytes(
-                *<&[u8; 8]>::try_from(src).unwrap()))),
+                *<&[u8; 8]>::try_from(src).unwrap(),
+            ))),
             _ => None,
         }
     }
@@ -402,7 +402,8 @@ impl FLR {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm64ec",
-            target_arch = "riscv64")))]
+            target_arch = "riscv64"
+        )))]
         {
             // Suppose that x >= 0. If x >= 2^52, then it is already an
             // integer. Otherwise, computing x + 2^52 will yield a value
@@ -440,8 +441,7 @@ impl FLR {
             use core::arch::x86_64::*;
             let x = self.0;
             let r = x as i64;
-            let t = _mm_comilt_sd(_mm_set_sd(x),
-                _mm_cvtsi64x_sd(_mm_setzero_pd(), r));
+            let t = _mm_comilt_sd(_mm_set_sd(x), _mm_cvtsi64x_sd(_mm_setzero_pd(), r));
             return r - (t as i64);
         }
 
@@ -463,7 +463,8 @@ impl FLR {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm64ec",
-            target_arch = "riscv64")))]
+            target_arch = "riscv64"
+        )))]
         {
             // We use the native conversion (which is a trunc()) and then
             // subtract 1 if that yields a value greater than the source.
@@ -569,12 +570,15 @@ impl FLR {
             }
         }
 
-        #[cfg(any(feature = "sqrt_emu",
+        #[cfg(any(
+            feature = "sqrt_emu",
             not(any(
                 target_arch = "x86_64",
                 target_arch = "aarch64",
                 target_arch = "arm64ec",
-                target_arch = "riscv64"))))]
+                target_arch = "riscv64"
+            ))
+        ))]
         {
             let x = u64::from_le_bytes(self.0.to_le_bytes());
             let z = Self::sqrt_emu(x);
@@ -627,11 +631,15 @@ impl FLR {
     // for architecture other than the ones supported directly in sqrt()
     // (square root extraction normally uses a standard library function,
     // which we cannot use since this is a no_std library).
-    #[cfg(any(feature = "sqrt_emu", not(any(
-        target_arch = "x86_64",
-        target_arch = "aarch64",
-        target_arch = "arm64ec",
-        target_arch = "riscv64"))))]
+    #[cfg(any(
+        feature = "sqrt_emu",
+        not(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm64ec",
+            target_arch = "riscv64"
+        ))
+    ))]
     fn sqrt_emu(x: u64) -> u64 {
         // see FLR::sqrt() in flr_emu.rs for details
         const M52: u64 = 0x000FFFFFFFFFFFFF;
@@ -686,10 +694,12 @@ impl FLR {
         // low-end aarch64 (e.g. ARM Cortex A53 and A55), where
         // multiplications are a bit faster when operands are small (i.e.
         // fit on 32 bits).
-        #[cfg(any(target_arch = "x86_64",
+        #[cfg(any(
+            target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm64ec",
-            target_arch = "riscv64"))]
+            target_arch = "riscv64"
+        ))]
         {
             for i in 1..Self::EXPM_COEFFS.len() {
                 // Compute z*y over 128 bits, but keep only the top 64 bits.
@@ -704,10 +714,12 @@ impl FLR {
             return (((z as u128) * (y as u128)) >> 64) as u64;
         }
 
-        #[cfg(not(any(target_arch = "x86_64",
+        #[cfg(not(any(
+            target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm64ec",
-            target_arch = "riscv64")))]
+            target_arch = "riscv64"
+        )))]
         {
             let (z0, z1) = (z as u32, (z >> 32) as u32);
             for i in 1..Self::EXPM_COEFFS.len() {
@@ -718,7 +730,8 @@ impl FLR {
                 let f = (z0 as u64) * (y0 as u64);
                 let a = (z0 as u64) * (y1 as u64) + (f >> 32);
                 let b = (z1 as u64) * (y0 as u64);
-                let c = (a >> 32) + (b >> 32)
+                let c = (a >> 32)
+                    + (b >> 32)
                     + ((((a as u32) as u64) + ((b as u32) as u64)) >> 32)
                     + (z1 as u64) * (y1 as u64);
                 y = Self::EXPM_COEFFS[i].wrapping_sub(c);
@@ -733,7 +746,8 @@ impl FLR {
             let f = (z0 as u64) * (y0 as u64);
             let a = (z0 as u64) * (y1 as u64) + (f >> 32);
             let b = (z1 as u64) * (y0 as u64);
-            let y = (a >> 32) + (b >> 32)
+            let y = (a >> 32)
+                + (b >> 32)
                 + ((((a as u32) as u64) + ((b as u32) as u64)) >> 32)
                 + (z1 as u64) * (y1 as u64);
             return y;
@@ -741,18 +755,18 @@ impl FLR {
     }
 
     const EXPM_COEFFS: [u64; 13] = [
-                0x00000004741183A3,
-                0x00000036548CFC06,
-                0x0000024FDCBF140A,
-                0x0000171D939DE045,
-                0x0000D00CF58F6F84,
-                0x000680681CF796E3,
-                0x002D82D8305B0FEA,
-                0x011111110E066FD0,
-                0x0555555555070F00,
-                0x155555555581FF00,
-                0x400000000002B400,
-                0x7FFFFFFFFFFF4800,
-                0x8000000000000000,
+        0x00000004741183A3,
+        0x00000036548CFC06,
+        0x0000024FDCBF140A,
+        0x0000171D939DE045,
+        0x0000D00CF58F6F84,
+        0x000680681CF796E3,
+        0x002D82D8305B0FEA,
+        0x011111110E066FD0,
+        0x0555555555070F00,
+        0x155555555581FF00,
+        0x400000000002B400,
+        0x7FFFFFFFFFFF4800,
+        0x8000000000000000,
     ];
 }
