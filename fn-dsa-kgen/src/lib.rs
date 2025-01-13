@@ -149,6 +149,7 @@ macro_rules! kgen_impl {
             
             let mut seed = [0u8; 32];
             rng.fill_bytes(&mut seed);
+            
             self.keygen_with_seed(logn, &seed, sign_key, vrfy_key);
         }
 
@@ -196,23 +197,6 @@ kgen_impl!(KeyPairGenerator1024, 10, 10);
 // for logn = 2 to 8). Such smaller degrees are intended only for testing
 // and research purposes; they are not standardized.
 kgen_impl!(KeyPairGeneratorWeak, 2, 8);
-
-fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
-    sign_key: &mut [u8], vrfy_key: &mut [u8],
-    tmp_i8: &mut [i8], tmp_u16: &mut [u16],
-    tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])
-{
-    assert!(2 <= logn && logn <= 10);
-    assert!(sign_key.len() == sign_key_size(logn));
-    assert!(vrfy_key.len() == vrfy_key_size(logn));
-
-    let n = 1usize << logn;
-
-    // Get a new seed. Everything is generated deterministically from
-    // the seed.
-    let mut seed = [0u8; 32];
-    rng.fill_bytes(&mut seed);
-}
 
 // Generate a new key pair, using the provided random generator as
 // source for the initial entropy. The degree is n = 2^logn, with
