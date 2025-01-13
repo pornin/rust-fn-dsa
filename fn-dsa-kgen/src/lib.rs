@@ -60,7 +60,9 @@
 //! ```
 //!
 //! [`OsRng`]: https://docs.rs/rand_core/0.6.4/rand_core/struct.OsRng.html
-
+//! 
+//! Modified by The Resonance Network developers 2025
+//! 
 mod fxp;
 mod gauss;
 mod mp31;
@@ -117,6 +119,11 @@ pub trait KeyPairGenerator: Default {
     /// functions).
     fn keygen<T: CryptoRng + RngCore>(&mut self,
         logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8]);
+    
+    /// Generate a new key pair using a provided seed.
+    fn keygen_with_seed(&mut self,
+        logn: u32, seed: &[u8], sign_key: &mut [u8], vrfy_key: &mut [u8]);
+
 }
 
 macro_rules! kgen_impl {
@@ -139,7 +146,18 @@ macro_rules! kgen_impl {
         {
             // Enforce minimum and maximum degree.
             assert!(logn >= ($logn_min) && logn <= ($logn_max));
-            keygen_inner(logn, rng, sign_key, vrfy_key,
+            
+            let mut seed = [0u8; 32];
+            rng.fill_bytes(&mut seed);
+            self.keygen_with_seed(logn, &seed, sign_key, vrfy_key);
+        }
+
+        fn keygen_with_seed(&mut self,
+            logn: u32, seed: &[u8], sign_key: &mut [u8], vrfy_key: &mut [u8])
+        {
+            // Enforce minimum and maximum degree.
+            assert!(logn >= ($logn_min) && logn <= ($logn_max));
+            keygen_inner_with_seed(logn, seed, sign_key, vrfy_key,
                 &mut self.tmp_i8, &mut self.tmp_u16,
                 &mut self.tmp_u32, &mut self.tmp_fxr);
         }
@@ -179,17 +197,6 @@ kgen_impl!(KeyPairGenerator1024, 10, 10);
 // and research purposes; they are not standardized.
 kgen_impl!(KeyPairGeneratorWeak, 2, 8);
 
-// Generate a new key pair, using the provided random generator as
-// source for the initial entropy. The degree is n = 2^logn, with
-// 2 <= logn <= 10 (normal keys use logn = 9 or 10, for degrees 512
-// and 1024, respectively; smaller degrees are toy versions for tests).
-// The provided output slices must have the correct lengths for
-// the requested degrees.
-// Minimum sizes for temporaries (in number of elements):
-//   tmp_i8:  4*n
-//   tmp_u16: 2*n
-//   tmp_u32: 6*n
-//   tmp_fxr: 2.5*n
 fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
     sign_key: &mut [u8], vrfy_key: &mut [u8],
     tmp_i8: &mut [i8], tmp_u16: &mut [u16],
@@ -205,6 +212,30 @@ fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
     // the seed.
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
+}
+
+// Generate a new key pair, using the provided random generator as
+// source for the initial entropy. The degree is n = 2^logn, with
+// 2 <= logn <= 10 (normal keys use logn = 9 or 10, for degrees 512
+// and 1024, respectively; smaller degrees are toy versions for tests).
+// The provided output slices must have the correct lengths for
+// the requested degrees.
+// Minimum sizes for temporaries (in number of elements):
+//   tmp_i8:  4*n
+//   tmp_u16: 2*n
+//   tmp_u32: 6*n
+//   tmp_fxr: 2.5*n
+
+fn keygen_inner_with_seed(logn: u32, seed: &[u8],
+    sign_key: &mut [u8], vrfy_key: &mut [u8],
+    tmp_i8: &mut [i8], tmp_u16: &mut [u16],
+    tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])
+{
+    assert!(2 <= logn && logn <= 10);
+    assert!(sign_key.len() == sign_key_size(logn));
+    assert!(vrfy_key.len() == vrfy_key_size(logn));
+
+    let n = 1usize << logn;
 
     // Make f, g, F and G.
     // Keygen is slow enough that the runtime cost for AVX2 detection
