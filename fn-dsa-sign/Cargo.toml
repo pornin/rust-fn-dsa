@@ -1,6 +1,6 @@
 [package]
 name = "fn-dsa-sign"
-version = "0.2.0"
+version = "0.3.0"
 authors.workspace = true
 categories.workspace = true
 description.workspace = true
@@ -24,3 +24,4 @@ small_context = []
 no_avx2 = []
 div_emu = []
 sqrt_emu = []
+shake256x4 = []

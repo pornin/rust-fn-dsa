@@ -93,6 +93,13 @@ modify the code generation:
     can be used if compiled code footprint is an issue. SSE2 opcodes will
     still be used.
 
+  - `shake256x4`: switch the internal PRNG from SHAKE256 to four SHAKE256
+    instances running in parallel, with interleaved output; this makes
+    signature generation about 20% faster on x86 with AVX2 support, but
+    slightly raises stack usage. On other platforms (including x86 without
+    AVX2 support) it does not noticeably change signing performance. The
+    impact on key pair generation speed is always small.
+
   - `div_emu`: on `riscv64`, do not use the hardware implementation for
     floating-point divisions. This feature was included because some
     RISC-V cores, in particular the SiFive U74, have constant-time
@@ -108,8 +115,7 @@ modify the code generation:
     using `small_context` shrinks the context size from about 114 kB to
     about 82 kB, but it also increases signature cost by about 25%.
 
-Of these options, only `no_avx2` has any impact on keygen and verifying.
-
+Of these options, only `no_avx2` has any impact on verifying.
 
 ## Performance
 
@@ -133,8 +139,8 @@ performance is achieved (in clock cycles):
 ```
     degree    keygen      sign     +sign    verify  +verify
    ---------------------------------------------------------
-      512    11800000    840000    645000    75000    52000
-     1024    45000000   1560000   1280000   151000   105000
+      512    11800000   1020000    856000    75000    52000
+     1024    45000000   1980000   1700000   151000   105000
 ```
 
 `+sign` means generating a new signature on a new message but with the
@@ -151,8 +157,8 @@ follows:
 ```
     degree    keygen      sign     +sign    verify  +verify
    ---------------------------------------------------------
-      512    21500000   1070000    747000   145000   104000
-     1024    80000000   2120000   1500000   298000   212000
+      512    21500000   1120000    795000   145000   104000
+     1024    80000000   2220000   1590000   298000   212000
 ```
 
 These figures are very close to what can be achieved on the Intel Coffee

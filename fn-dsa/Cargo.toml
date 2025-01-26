@@ -1,6 +1,6 @@
 [package]
 name = "fn-dsa"
-version = "0.2.0"
+version = "0.3.0"
 authors.workspace = true
 categories.workspace = true
 description.workspace = true
@@ -12,10 +12,10 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-fn-dsa-comm = { version = "0.2", path = "../fn-dsa-comm" }
-fn-dsa-kgen = { version = "0.2", path = "../fn-dsa-kgen" }
-fn-dsa-sign = { version = "0.2", path = "../fn-dsa-sign" }
-fn-dsa-vrfy = { version = "0.2", path = "../fn-dsa-vrfy" }
+fn-dsa-comm = { version = "0.3", path = "../fn-dsa-comm" }
+fn-dsa-kgen = { version = "0.3", path = "../fn-dsa-kgen" }
+fn-dsa-sign = { version = "0.3", path = "../fn-dsa-sign" }
+fn-dsa-vrfy = { version = "0.3", path = "../fn-dsa-vrfy" }
 
 [dev-dependencies]
 hex.workspace = true
@@ -23,6 +23,7 @@ hex.workspace = true
 [features]
 default = []
 no_avx2 = []
+shake256x4 = [ "fn-dsa-comm/shake256x4", "fn-dsa-kgen/shake256x4", "fn-dsa-sign/shake256x4" ]
 
 [[bench]]
 name = "keygen"

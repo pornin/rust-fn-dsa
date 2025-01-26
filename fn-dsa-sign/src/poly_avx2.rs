@@ -623,7 +623,7 @@ mod tests {
 
     use super::*;
     use crate::flr::FLR;
-    use fn_dsa_comm::shake::SHAKE256x4;
+    use crate::tests::SHAKE256x4;
 
     fn rand_poly(rng: &mut SHAKE256x4, f: &mut [FLR]) {
         for i in 0..f.len() {

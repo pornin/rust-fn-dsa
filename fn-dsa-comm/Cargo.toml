@@ -1,6 +1,6 @@
 [package]
 name = "fn-dsa-comm"
-version = "0.2.0"
+version = "0.3.0"
 authors.workspace = true
 categories.workspace = true
 description.workspace = true
@@ -23,3 +23,4 @@ hex.workspace = true
 [features]
 default = []
 no_avx2 = []
+shake256x4 = []

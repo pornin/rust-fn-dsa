@@ -347,7 +347,8 @@ impl SubAssign<&FLR> for FLR {
 mod tests {
 
     use super::*;
-    use fn_dsa_comm::shake::{SHAKE256, SHAKE256x4};
+    use fn_dsa_comm::shake::SHAKE256;
+    use crate::tests::SHAKE256x4;
 
     fn rand_u64(rng: &mut SHAKE256x4) -> u64 {
         let mut x = 0;

@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
 
 //! # SHAKE Implementation
 //!
@@ -42,6 +43,7 @@ impl KeccakState {
     // caller will need to call process(), which applies the Keccak-f
     // permutation. This function supports large seeds, by internally
     // calling process() when necessary.
+    #[cfg(feature = "shake256x4")]
     fn new_shake256_with_id(seed: &[u8], id: u8) -> Self {
         let mut state = Self::new();
         let mut j = 0;
@@ -708,6 +710,70 @@ impl<const SZ: usize> SHAKE<SZ> {
     }
 }
 
+/// PRNG based on SHAKE256.
+///
+/// This is just a wrapper SHAKE256 itself, with an extra buffer to speed
+/// up common usage. 16-bit and 64-bit words are obtained from the
+/// corresponding number of bytes, interpreted in little-endian order.
+#[derive(Copy, Clone, Debug)]
+pub struct SHAKE256_PRNG {
+    sh: SHAKE256,
+    buf: [u8; 136],
+    ptr: usize,
+}
+
+impl SHAKE256_PRNG {
+
+    fn refill(&mut self) {
+        self.sh.extract(&mut self.buf);
+        self.ptr = 0;
+    }
+}
+
+impl PRNG for SHAKE256_PRNG {
+
+    fn new(seed: &[u8]) -> Self {
+        let mut sh = SHAKE256::new();
+        sh.inject(seed);
+        sh.flip();
+        Self { sh, buf: [0u8; 136], ptr: 136 }
+    }
+
+    fn next_u8(&mut self) -> u8 {
+        if self.ptr == self.buf.len() {
+            self.refill();
+        }
+        let x = self.buf[self.ptr];
+        self.ptr += 1;
+        x
+    }
+
+    fn next_u16(&mut self) -> u16 {
+        if self.ptr >= (self.buf.len() - 1) {
+            let x = self.next_u8() as u16;
+            return x | ((self.next_u8() as u16) << 8);
+        }
+        let x = u16::from_le_bytes(*<&[u8; 2]>::try_from(
+            &self.buf[self.ptr..self.ptr + 2]).unwrap());
+        self.ptr += 2;
+        x
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        if self.ptr >= (self.buf.len() - 7) {
+            let mut x = 0;
+            for i in 0..8 {
+                x |= (self.next_u8() as u64) << (i << 3);
+            }
+            return x;
+        }
+        let x = u64::from_le_bytes(*<&[u8; 8]>::try_from(
+            &self.buf[self.ptr..self.ptr + 8]).unwrap());
+        self.ptr += 8;
+        x
+    }
+}
+
 /// PRNG based on four parallel SHAKE256 instances.
 ///
 /// Initialization is based on a provided seed of arbitrary length. The
@@ -716,6 +782,7 @@ impl<const SZ: usize> SHAKE<SZ> {
 /// depending on the inner instance). The four SHAKE256 outputs are
 /// interleaved with a 64-bit granularity (i.e. first 8 bytes are from
 /// inner instance 0, then next 8 bytes are from inner instance 1, etc).
+#[cfg(feature = "shake256x4")]
 #[derive(Copy, Clone, Debug)]
 pub struct SHAKE256x4 {
     state: [KeccakState; 4],
@@ -729,13 +796,17 @@ pub struct SHAKE256x4 {
 // Internal buffer of SHAKE256x4 must have length exactly 4*136 = 544
 // bytes, since each SHAKE256 instance outputs 136 bytes for each
 // Keccak-f permutation invocation.
+#[cfg(feature = "shake256x4")]
 const SHAKE256x4_BUF_LEN: usize = 4 * 136;
 
-#[cfg(all(not(feature = "no_avx2"),
+#[cfg(all(
+    feature = "shake256x4",
+    not(feature = "no_avx2"),
     any(target_arch = "x86_64", target_arch = "x86")))]
 #[path = "shake256x4_avx2.rs"]
 mod shake256x4_avx2;
 
+#[cfg(feature = "shake256x4")]
 impl SHAKE256x4 {
 
     /// Create a new instance over the provided seed.
@@ -840,6 +911,7 @@ impl SHAKE256x4 {
     }
 }
 
+#[cfg(feature = "shake256x4")]
 impl PRNG for SHAKE256x4 {
 
     fn new(seed: &[u8]) -> Self {
@@ -933,6 +1005,7 @@ mod tests {
     ];
 
     // This function tests SHAKE256x4 against the SHAKE implementation.
+    #[cfg(feature = "shake256x4")]
     #[test]
     fn shake256x4() {
         let mut seed_tab = [0u8; 300];

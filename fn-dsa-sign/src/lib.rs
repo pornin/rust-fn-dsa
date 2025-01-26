@@ -257,7 +257,18 @@ macro_rules! sign_key_impl {
             #[cfg(all(not(feature = "no_avx2"), target_arch = "x86_64"))]
             if self.use_avx2 {
                 unsafe {
+                    #[cfg(feature = "shake256x4")]
                     sign_avx2::sign_avx2_inner::<T, shake::SHAKE256x4>(
+                        self.logn, rng,
+                        &self.f[..n], &self.g[..n], &self.F[..n], &self.G[..n],
+                        &self.hashed_vrfy_key, ctx, id, hv, sig,
+                        #[cfg(not(feature = "small_context"))]
+                        &self.basis[..(4 * n)],
+                        &mut self.tmp_i16, &mut self.tmp_u16,
+                        &mut self.tmp_flr);
+
+                    #[cfg(not(feature = "shake256x4"))]
+                    sign_avx2::sign_avx2_inner::<T, shake::SHAKE256_PRNG>(
                         self.logn, rng,
                         &self.f[..n], &self.g[..n], &self.F[..n], &self.G[..n],
                         &self.hashed_vrfy_key, ctx, id, hv, sig,
@@ -269,7 +280,16 @@ macro_rules! sign_key_impl {
                 return;
             }
 
+            #[cfg(feature = "shake256x4")]
             sign_inner::<T, shake::SHAKE256x4>(self.logn, rng,
+                &self.f[..n], &self.g[..n], &self.F[..n], &self.G[..n],
+                &self.hashed_vrfy_key, ctx, id, hv, sig,
+                #[cfg(not(feature = "small_context"))]
+                &self.basis[..(4 * n)],
+                &mut self.tmp_i16, &mut self.tmp_u16, &mut self.tmp_flr);
+
+            #[cfg(not(feature = "shake256x4"))]
+            sign_inner::<T, shake::SHAKE256_PRNG>(self.logn, rng,
                 &self.f[..n], &self.g[..n], &self.F[..n], &self.G[..n],
                 &self.hashed_vrfy_key, ctx, id, hv, sig,
                 #[cfg(not(feature = "small_context"))]
@@ -683,10 +703,105 @@ fn sign_inner<T: CryptoRng + RngCore, P: PRNG>(logn: u32, rng: &mut T,
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 
     use super::*;
     use fn_dsa_comm::shake::SHAKE256;
+
+    // We need SHAKE256x4 for some tests (because test vectors were
+    // originally built with that PRNG). If we are not using it in
+    // the main code, then we must define a custom one here.
+    #[cfg(feature = "shake256x4")]
+    pub(crate) use fn_dsa_comm::shake::SHAKE256x4;
+
+    #[cfg(not(feature = "shake256x4"))]
+    #[derive(Copy, Clone, Debug)]
+    pub(crate) struct SHAKE256x4 {
+        sh: [SHAKE256; 4],
+        buf: [u8; 4 * 136],
+        ptr: usize,
+    }
+
+    #[cfg(not(feature = "shake256x4"))]
+    impl SHAKE256x4 {
+        pub fn new(seed: &[u8]) -> Self {
+            let mut sh = [
+                SHAKE256::new(),
+                SHAKE256::new(),
+                SHAKE256::new(),
+                SHAKE256::new(),
+            ];
+            for i in 0..4 {
+                sh[i].inject(seed);
+                sh[i].inject(&[i as u8]);
+                sh[i].flip();
+            }
+            Self {
+                sh,
+                buf: [0u8; 4 * 136],
+                ptr: 4 * 136,
+            }
+        }
+
+        fn refill(&mut self) {
+            self.ptr = 0;
+            for i in 0..(4 * 136 / 32) {
+                for j in 0..4 {
+                    let k = 32 * i + 8 * j;
+                    self.sh[j].extract(&mut self.buf[k..(k + 8)]);
+                }
+            }
+        }
+
+        pub fn next_u8(&mut self) -> u8 {
+            if self.ptr >= 4 * 136 {
+                self.refill();
+            }
+            let x = self.buf[self.ptr];
+            self.ptr += 1;
+            x
+        }
+
+        pub fn next_u16(&mut self) -> u16 {
+            if self.ptr >= 4 * 136 - 1 {
+                self.refill();
+            }
+            let x = u16::from_le_bytes(*<&[u8; 2]>::try_from(
+                &self.buf[self.ptr..self.ptr + 2]).unwrap());
+            self.ptr += 2;
+            x
+        }
+
+        pub fn next_u64(&mut self) -> u64 {
+            if self.ptr >= 4 * 136 - 7 {
+                self.refill();
+            }
+            let x = u64::from_le_bytes(*<&[u8; 8]>::try_from(
+                &self.buf[self.ptr..self.ptr + 8]).unwrap());
+            self.ptr += 8;
+            x
+        }
+    }
+
+    #[cfg(not(feature = "shake256x4"))]
+    impl fn_dsa_comm::PRNG for SHAKE256x4 {
+
+        fn new(seed: &[u8]) -> Self {
+            SHAKE256x4::new(seed)
+        }
+
+        fn next_u8(&mut self) -> u8 {
+            SHAKE256x4::next_u8(self)
+        }
+
+        fn next_u16(&mut self) -> u16 {
+            SHAKE256x4::next_u16(self)
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            SHAKE256x4::next_u64(self)
+        }
+    }
 
     // PRNG implementation based on ChaCha20, used to mimic the reference
     // C code to get reproducible behaviour. The seed MUST have length
