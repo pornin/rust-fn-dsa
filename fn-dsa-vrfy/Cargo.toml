@@ -12,7 +12,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-fn-dsa-comm = { version = "0.2", path = "../fn-dsa-comm" }
+fn-dsa-comm = { version = "0.3", path = "../fn-dsa-comm" }
 
 [dev-dependencies]
 hex.workspace = true
