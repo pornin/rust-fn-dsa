@@ -60,7 +60,9 @@
 //! ```
 //!
 //! [`OsRng`]: https://docs.rs/rand_core/0.6.4/rand_core/struct.OsRng.html
-
+//! 
+//! Modified by The Resonance Network developers 2025
+//! 
 mod fxp;
 mod gauss;
 mod mp31;
@@ -119,6 +121,11 @@ pub trait KeyPairGenerator: Default {
     /// functions).
     fn keygen<T: CryptoRng + RngCore>(&mut self,
         logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8]);
+    
+    /// Generate a new key pair using a provided seed.
+    fn keygen_with_seed(&mut self,
+        logn: u32, seed: &[u8], sign_key: &mut [u8], vrfy_key: &mut [u8]);
+
 }
 
 macro_rules! kgen_impl {
@@ -141,7 +148,19 @@ macro_rules! kgen_impl {
         {
             // Enforce minimum and maximum degree.
             assert!(logn >= ($logn_min) && logn <= ($logn_max));
-            keygen_inner(logn, rng, sign_key, vrfy_key,
+            
+            let mut seed = [0u8; 32];
+            rng.fill_bytes(&mut seed);
+            
+            self.keygen_with_seed(logn, &seed, sign_key, vrfy_key);
+        }
+
+        fn keygen_with_seed(&mut self,
+            logn: u32, seed: &[u8], sign_key: &mut [u8], vrfy_key: &mut [u8])
+        {
+            // Enforce minimum and maximum degree.
+            assert!(logn >= ($logn_min) && logn <= ($logn_max));
+            keygen_inner_with_seed(logn, seed, sign_key, vrfy_key,
                 &mut self.tmp_i8, &mut self.tmp_u16,
                 &mut self.tmp_u32, &mut self.tmp_fxr);
         }
@@ -192,7 +211,8 @@ kgen_impl!(KeyPairGeneratorWeak, 2, 8);
 //   tmp_u16: 2*n
 //   tmp_u32: 6*n
 //   tmp_fxr: 2.5*n
-fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
+
+fn keygen_inner_with_seed(logn: u32, seed: &[u8],
     sign_key: &mut [u8], vrfy_key: &mut [u8],
     tmp_i8: &mut [i8], tmp_u16: &mut [u16],
     tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])
@@ -202,11 +222,6 @@ fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
     assert!(vrfy_key.len() == vrfy_key_size(logn));
 
     let n = 1usize << logn;
-
-    // Get a new seed. Everything is generated deterministically from
-    // the seed.
-    let mut seed = [0u8; 32];
-    rng.fill_bytes(&mut seed);
 
     // Make f, g, F and G.
     // Keygen is slow enough that the runtime cost for AVX2 detection
