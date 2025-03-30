@@ -336,6 +336,7 @@ impl<T: PRNG> Sampler<T> {
         // saturate s at 63
         let mut s = si as u32;
         s |= 63u32.wrapping_sub(s) >> 26;
+        s &= 63;
 
         // z <- ccs*exp(-x), scaled, then right-shift by s.
         let z = (Self::expm_p63_sse2(r, ccs) << 1).wrapping_sub(1);
