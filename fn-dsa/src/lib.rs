@@ -120,7 +120,7 @@ pub use fn_dsa_comm::{
     HASH_ID_SHAKE256,
     DomainContext,
     DOMAIN_NONE,
-    CryptoRng, RngCore, RngError,
+    CryptoRng, RngCore,
 };
 pub use fn_dsa_comm::shake::{SHAKE, SHAKE128, SHAKE256, SHA3_224, SHA3_256, SHA3_384, SHA3_512};
 pub use fn_dsa_kgen::{KeyPairGenerator, KeyPairGeneratorStandard, KeyPairGeneratorWeak, KeyPairGenerator512, KeyPairGenerator1024};
@@ -156,10 +156,6 @@ mod tests {
         fn next_u64(&mut self) -> u64 { unimplemented!(); }
         fn fill_bytes(&mut self, dest: &mut [u8]) {
             self.0.extract(dest);
-        }
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
-            self.fill_bytes(dest);
-            Ok(())
         }
     }
 
@@ -198,10 +194,6 @@ mod tests {
                 j += clen;
             }
             self.ptr = ptr;
-        }
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
-            self.fill_bytes(dest);
-            Ok(())
         }
     }
 

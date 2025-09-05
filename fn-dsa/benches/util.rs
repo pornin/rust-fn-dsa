@@ -1,4 +1,4 @@
-use fn_dsa::{CryptoRng, RngCore, RngError};
+use fn_dsa::{CryptoRng, RngCore};
 use fn_dsa_comm::shake::{SHAKE256};
 
 #[cfg(target_arch = "x86")]
@@ -66,12 +66,6 @@ impl RngCore for FakeRNG {
     }
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         self.0.extract(dest);
-    }
-    fn try_fill_bytes(&mut self, dest: &mut [u8])
-        -> Result<(), RngError>
-    {
-        self.0.extract(dest);
-        Ok(())
     }
 }
 

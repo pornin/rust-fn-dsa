@@ -94,7 +94,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 pub use fn_dsa_comm::{
     sign_key_size, vrfy_key_size,
     FN_DSA_LOGN_512, FN_DSA_LOGN_1024,
-    CryptoRng, RngCore, RngError,
+    CryptoRng,
 };
 
 /// Key pair generator and temporary buffers.
@@ -117,7 +117,7 @@ pub trait KeyPairGenerator: Default {
     /// destination slices MUST have the exact size for their respective
     /// contents (see the `sign_key_size()` and `vrfy_key_size()`
     /// functions).
-    fn keygen<T: CryptoRng + RngCore>(&mut self,
+    fn keygen<T: CryptoRng>(&mut self,
         logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8]);
 }
 
@@ -136,7 +136,7 @@ macro_rules! kgen_impl {
 
     impl KeyPairGenerator for $typename {
 
-        fn keygen<T: CryptoRng + RngCore>(&mut self,
+        fn keygen<T: CryptoRng>(&mut self,
             logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8])
         {
             // Enforce minimum and maximum degree.
@@ -192,7 +192,7 @@ kgen_impl!(KeyPairGeneratorWeak, 2, 8);
 //   tmp_u16: 2*n
 //   tmp_u32: 6*n
 //   tmp_fxr: 2.5*n
-fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
+fn keygen_inner<T: CryptoRng>(logn: u32, rng: &mut T,
     sign_key: &mut [u8], vrfy_key: &mut [u8],
     tmp_i8: &mut [i8], tmp_u16: &mut [u16],
     tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])

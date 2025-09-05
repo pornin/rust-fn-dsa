@@ -84,7 +84,7 @@ pub use fn_dsa_comm::{
     HASH_ID_SHAKE256,
     DomainContext,
     DOMAIN_NONE,
-    CryptoRng, RngCore, RngError,
+    CryptoRng, RngCore,
 };
 
 /// Signing key handler and temporary buffers.
@@ -130,7 +130,7 @@ pub trait SigningKey: Sized {
     ///  - `sig`: the output slice for the generated signature; its size
     ///    MUST be exactly that expected for the key degree (see
     ///    `signature_size()`).
-    fn sign<T: CryptoRng + RngCore>(&mut self, rng: &mut T,
+    fn sign<T: CryptoRng>(&mut self, rng: &mut T,
         ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8]);
 }
 
@@ -249,7 +249,7 @@ macro_rules! sign_key_impl {
             vrfy_key.copy_from_slice(&self.vrfy_key[..len]);
         }
 
-        fn sign<T: CryptoRng + RngCore>(&mut self, rng: &mut T,
+        fn sign<T: CryptoRng>(&mut self, rng: &mut T,
             ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8])
         {
             let n = 1usize << self.logn;
@@ -438,7 +438,7 @@ fn compute_basis_inner(logn: u32,
 // 1/12289
 const INV_Q: flr::FLR = flr::FLR::scaled(6004310871091074, -66);
 
-fn sign_inner<T: CryptoRng + RngCore, P: PRNG>(logn: u32, rng: &mut T,
+fn sign_inner<T: CryptoRng, P: PRNG>(logn: u32, rng: &mut T,
     f: &[i8], g: &[i8], F: &[i8], G: &[i8], hashed_vrfy_key: &[u8],
     ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8],
     #[cfg(not(feature = "small_context"))]
@@ -1108,10 +1108,6 @@ pub(crate) mod tests {
         fn fill_bytes(&mut self, dest: &mut [u8]) {
             dest.copy_from_slice(&KAT_512_RND[self.0..(self.0 + dest.len())]);
             self.0 += dest.len();
-        }
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
-            self.fill_bytes(dest);
-            Ok(())
         }
     }
 
