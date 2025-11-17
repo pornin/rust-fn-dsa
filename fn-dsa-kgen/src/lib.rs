@@ -119,20 +119,36 @@ pub trait KeyPairGenerator: Default {
     /// functions).
     fn keygen<T: CryptoRng + RngCore>(&mut self,
         logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8]);
+	
+    /// Generate a new key pair from a given seed.
+    ///
+    /// The seed must have strong entropy and should be at least 32 bytes. The
+    /// degree (`logn`) must be supported by the instance; a panic is
+    /// triggered otherwise. The new signing and verifying keys are
+    /// written into `sign_key` and `vrfy_key`, respectively; these
+    /// destination slices MUST have the exact size for their respective
+    /// contents (see the `sign_key_size()` and `vrfy_key_size()`
+    /// functions).
+    fn keygen_from_seed(
+        &mut self,
+        logn: u32,
+        seed: &[u8],
+        sign_key: &mut [u8],
+        vrfy_key: &mut [u8],
+    );
 }
 
 macro_rules! kgen_impl {
-    ($typename:ident, $logn_min:expr, $logn_max:expr) =>
-{
-    #[doc = concat!("Key pair generator for degrees (`logn`) ",
-        stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
-    #[derive(Zeroize, ZeroizeOnDrop)]
-    pub struct $typename {
-        tmp_i8: [i8; 4 * (1 << ($logn_max))],
-        tmp_u16: [u16; 2 * (1 << ($logn_max))],
-        tmp_u32: [u32; 6 * (1 << ($logn_max))],
-        tmp_fxr: [fxp::FXR; 5 * (1 << (($logn_max) - 1))],
-    }
+    ($typename:ident, $logn_min:expr, $logn_max:expr) => {
+        #[doc = concat!("Key pair generator for degrees (`logn`) ",
+                stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
+        #[derive(Zeroize, ZeroizeOnDrop)]
+        pub struct $typename {
+            tmp_i8: [i8; 4 * (1 << ($logn_max))],
+            tmp_u16: [u16; 2 * (1 << ($logn_max))],
+            tmp_u32: [u32; 6 * (1 << ($logn_max))],
+            tmp_fxr: [fxp::FXR; 5 * (1 << (($logn_max) - 1))],
+        }
 
     impl KeyPairGenerator for $typename {
 
@@ -141,23 +157,60 @@ macro_rules! kgen_impl {
         {
             // Enforce minimum and maximum degree.
             assert!(logn >= ($logn_min) && logn <= ($logn_max));
-            keygen_inner(logn, rng, sign_key, vrfy_key,
-                &mut self.tmp_i8, &mut self.tmp_u16,
-                &mut self.tmp_u32, &mut self.tmp_fxr);
-        }
-    }
 
-    impl Default for $typename {
-        fn default() -> Self {
-            Self {
-                tmp_i8:  [0i8; 4 * (1 << ($logn_max))],
-                tmp_u16: [0u16; 2 * (1 << ($logn_max))],
-                tmp_u32: [0u32; 6 * (1 << ($logn_max))],
-                tmp_fxr: [fxp::FXR::ZERO; 5 * (1 << (($logn_max) - 1))],
+                // Get a new seed. Everything is generated deterministically from
+                // the seed.
+                let mut seed = [0u8; 32];
+                rng.fill_bytes(&mut seed);
+
+                keygen_inner(
+                    logn,
+                    &seed,
+                    sign_key,
+                    vrfy_key,
+                    &mut self.tmp_i8,
+                    &mut self.tmp_u16,
+                    &mut self.tmp_u32,
+                    &mut self.tmp_fxr,
+                );
+            }
+
+            fn keygen_from_seed(
+                &mut self,
+                logn: u32,
+                seed: &[u8],
+                sign_key: &mut [u8],
+                vrfy_key: &mut [u8],
+            ) {
+                // Enforce minimum and maximum degree.
+                assert!(logn >= ($logn_min) && logn <= ($logn_max));
+                assert!(seed.len() >= 32);
+
+                keygen_inner(
+                    logn,
+                    seed,
+                    sign_key,
+                    vrfy_key,
+                    &mut self.tmp_i8,
+                    &mut self.tmp_u16,
+                    &mut self.tmp_u32,
+                    &mut self.tmp_fxr,
+                );
             }
         }
-    }
-} }
+
+        impl Default for $typename {
+            fn default() -> Self {
+                Self {
+                    tmp_i8: [0i8; 4 * (1 << ($logn_max))],
+                    tmp_u16: [0u16; 2 * (1 << ($logn_max))],
+                    tmp_u32: [0u32; 6 * (1 << ($logn_max))],
+                    tmp_fxr: [fxp::FXR::ZERO; 5 * (1 << (($logn_max) - 1))],
+                }
+            }
+        }
+    };
+}
 
 // An FN-DSA key pair generator for the standard degrees (512 and 1024,
 // for logn = 9 or 10, respectively). Attempts at creating a lower degree
@@ -192,21 +245,21 @@ kgen_impl!(KeyPairGeneratorWeak, 2, 8);
 //   tmp_u16: 2*n
 //   tmp_u32: 6*n
 //   tmp_fxr: 2.5*n
-fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
-    sign_key: &mut [u8], vrfy_key: &mut [u8],
-    tmp_i8: &mut [i8], tmp_u16: &mut [u16],
-    tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])
-{
+fn keygen_inner(
+    logn: u32,
+    seed: &[u8],
+    sign_key: &mut [u8],
+    vrfy_key: &mut [u8],
+    tmp_i8: &mut [i8],
+    tmp_u16: &mut [u16],
+    tmp_u32: &mut [u32],
+    tmp_fxr: &mut [fxp::FXR],
+) {
     assert!(2 <= logn && logn <= 10);
-    assert!(sign_key.len() == sign_key_size(logn));
-    assert!(vrfy_key.len() == vrfy_key_size(logn));
+    assert_eq!(sign_key.len(), sign_key_size(logn));
+    assert_eq!(vrfy_key.len(), vrfy_key_size(logn));
 
     let n = 1usize << logn;
-
-    // Get a new seed. Everything is generated deterministically from
-    // the seed.
-    let mut seed = [0u8; 32];
-    rng.fill_bytes(&mut seed);
 
     // Make f, g, F and G.
     // Keygen is slow enough that the runtime cost for AVX2 detection
@@ -219,12 +272,13 @@ fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
     let (h, t16) = tmp_u16.split_at_mut(n);
 
     loop {
-        #[cfg(all(not(feature = "no_avx2"),
-            any(target_arch = "x86_64", target_arch = "x86")))]
+        #[cfg(all(
+            not(feature = "no_avx2"),
+            any(target_arch = "x86_64", target_arch = "x86")
+        ))]
         if fn_dsa_comm::has_avx2() {
             unsafe {
-                keygen_from_seed_avx2(
-                    logn, &seed, f, g, F, G, t16, tmp_u32, tmp_fxr);
+                keygen_from_seed_avx2(logn, &seed, f, g, F, G, t16, tmp_u32, tmp_fxr);
                 fn_dsa_comm::mq_avx2::mqpoly_div_small(logn, f, g, h, t16);
             }
             break;
@@ -246,12 +300,12 @@ fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
     let j = 1 + codec::trim_i8_encode(f, nbits_fg, &mut sign_key[1..]);
     let j = j + codec::trim_i8_encode(g, nbits_fg, &mut sign_key[j..]);
     let j = j + codec::trim_i8_encode(F, 8, &mut sign_key[j..]);
-    assert!(j == sign_key.len());
+    assert_eq!(j, sign_key.len());
 
     // Encode the verifying key.
     vrfy_key[0] = 0x00 + (logn as u8);
     let j = 1 + codec::modq_encode(h, &mut vrfy_key[1..]);
-    assert!(j == vrfy_key.len());
+    assert_eq!(j, vrfy_key.len());
 }
 
 // Internal keygen function:
@@ -264,17 +318,24 @@ fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
 //   tmp_u16: n
 //   tmp_u32: 6*n
 //   tmp_fxr: 2.5*n
-fn keygen_from_seed(logn: u32, seed: &[u8],
-    f: &mut [i8], g: &mut [i8], F: &mut [i8], G: &mut [i8],
-    tmp_u16: &mut [u16], tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])
-{
+fn keygen_from_seed(
+    logn: u32,
+    seed: &[u8],
+    f: &mut [i8],
+    g: &mut [i8],
+    F: &mut [i8],
+    G: &mut [i8],
+    tmp_u16: &mut [u16],
+    tmp_u32: &mut [u32],
+    tmp_fxr: &mut [fxp::FXR],
+) {
     // Check the parameters.
     assert!(2 <= logn && logn <= 10);
     let n = 1usize << logn;
-    assert!(f.len() == n);
-    assert!(g.len() == n);
-    assert!(F.len() == n);
-    assert!(G.len() == n);
+    assert_eq!(f.len(), n);
+    assert_eq!(g.len(), n);
+    assert_eq!(F.len(), n);
+    assert_eq!(G.len(), n);
 
     #[cfg(feature = "shake256x4")]
     let mut rng = shake::SHAKE256x4::new(seed);
