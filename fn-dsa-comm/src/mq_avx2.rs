@@ -10,19 +10,17 @@
 //!
 //! [mq]: ../mq/
 
-#[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
 
 use core::mem::transmute;
 
 /// Check whether the provided polynomial with small coefficient is
 /// invertible modulo `X^n+1` and modulo q.
 #[target_feature(enable = "avx2")]
-pub unsafe fn mqpoly_small_is_invertible(logn: u32,
-    f: &[i8], tmp: &mut [u16]) -> bool
-{
+pub unsafe fn mqpoly_small_is_invertible(logn: u32, f: &[i8], tmp: &mut [u16]) -> bool {
     let n = 1usize << logn;
     mqpoly_small_to_int(logn, f, tmp);
     mqpoly_int_to_NTT(logn, tmp);
@@ -50,9 +48,7 @@ pub unsafe fn mqpoly_small_is_invertible(logn: u32,
 /// This function assumes that `f` is invertible. Output is in external
 /// representation (coefficients are in `[0,q-1]`).
 #[target_feature(enable = "avx2")]
-pub unsafe fn mqpoly_div_small(logn: u32,
-    f: &[i8], g: &[i8], h: &mut [u16], tmp: &mut [u16])
-{
+pub unsafe fn mqpoly_div_small(logn: u32, f: &[i8], g: &[i8], h: &mut [u16], tmp: &mut [u16]) {
     let n = 1usize << logn;
     mqpoly_small_to_int(logn, f, tmp);
     mqpoly_small_to_int(logn, g, h);
@@ -100,8 +96,7 @@ pub unsafe fn mqpoly_signed_to_ext(logn: u32, v: &[i16], d: &mut [u16]) {
         let qq = _mm256_set1_epi16(Q as i16);
         for i in 0..(1usize << (logn - 4)) {
             let y = _mm256_loadu_si256(vp.wrapping_add(i));
-            let y = _mm256_add_epi16(y,
-                _mm256_and_si256(qq, _mm256_srai_epi16(y, 15)));
+            let y = _mm256_add_epi16(y, _mm256_and_si256(qq, _mm256_srai_epi16(y, 15)));
             _mm256_storeu_si256(dp.wrapping_add(i), y);
         }
     } else {
@@ -135,8 +130,7 @@ unsafe fn mq_add(x: u32, y: u32) -> u32 {
 unsafe fn mq_add_x16(x: __m256i, y: __m256i) -> __m256i {
     let qq = _mm256_set1_epi16(Q as i16);
     let a = _mm256_sub_epi16(qq, _mm256_add_epi16(x, y));
-    let b = _mm256_add_epi16(a,
-        _mm256_and_si256(qq, _mm256_srai_epi16(a, 15)));
+    let b = _mm256_add_epi16(a, _mm256_and_si256(qq, _mm256_srai_epi16(a, 15)));
     _mm256_sub_epi16(qq, b)
 }
 
@@ -156,8 +150,7 @@ unsafe fn mq_sub(x: u32, y: u32) -> u32 {
 unsafe fn mq_sub_x16(x: __m256i, y: __m256i) -> __m256i {
     let qq = _mm256_set1_epi16(Q as i16);
     let a = _mm256_sub_epi16(y, x);
-    let b = _mm256_add_epi16(a,
-        _mm256_and_si256(qq, _mm256_srai_epi16(a, 15)));
+    let b = _mm256_add_epi16(a, _mm256_and_si256(qq, _mm256_srai_epi16(a, 15)));
     _mm256_sub_epi16(qq, b)
 }
 
@@ -205,8 +198,10 @@ unsafe fn mq_mred_x16(lo: __m256i, hi: __m256i) -> __m256i {
     let x = _mm256_add_epi16(
         _mm256_add_epi16(
             _mm256_mulhi_epu16(lo, q1ilox16),
-            _mm256_mullo_epi16(lo, q1ihix16)),
-        _mm256_mullo_epi16(hi, q1ilox16));
+            _mm256_mullo_epi16(lo, q1ihix16),
+        ),
+        _mm256_mullo_epi16(hi, q1ilox16),
+    );
 
     // x <- (x * Q) >> 16
     // x and Q both fit on 16 bits each.
@@ -307,10 +302,8 @@ pub unsafe fn mqpoly_small_to_int(logn: u32, f: &[i8], d: &mut [u16]) {
             let x = _mm_sub_epi8(_mm_setzero_si128(), x);
             let x0 = _mm_cvtepi8_epi16(x);
             let x1 = _mm_cvtepi8_epi16(_mm_bsrli_si128(x, 8));
-            let x0 = _mm_add_epi16(x0,
-                _mm_and_si128(_mm_srai_epi16(x0, 15), qq));
-            let x1 = _mm_add_epi16(x1,
-                _mm_and_si128(_mm_srai_epi16(x1, 15), qq));
+            let x0 = _mm_add_epi16(x0, _mm_and_si128(_mm_srai_epi16(x0, 15), qq));
+            let x1 = _mm_add_epi16(x1, _mm_and_si128(_mm_srai_epi16(x1, 15), qq));
             let x0 = _mm_sub_epi16(qq, x0);
             let x1 = _mm_sub_epi16(qq, x1);
             _mm_storeu_si128(dp.wrapping_add((i << 1) + 0), x0);
@@ -342,8 +335,9 @@ pub unsafe fn mqpoly_int_to_small(logn: u32, d: &[u16], f: &mut [i8]) -> bool {
         let fp: *mut __m128i = transmute(f.as_mut_ptr());
         let y128 = _mm256_set1_epi16(128);
         let sm = _mm256_setr_epi8(
-            0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1,
-            0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
+            0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1, 0, 2, 4, 6, 8, 10, 12, 14,
+            -1, -1, -1, -1, -1, -1, -1, -1,
+        );
         let mut ov = _mm256_setzero_si256();
         for i in 0..(1usize << (logn - 4)) {
             let y = _mm256_loadu_si256(dp.wrapping_add(i));
@@ -379,8 +373,9 @@ pub unsafe fn mqpoly_ext_to_int(logn: u32, a: &mut [u16]) {
         for i in 0..(1usize << (logn - 4)) {
             let y = _mm256_loadu_si256(ap.wrapping_add(i));
             let y = _mm256_add_epi16(
-                y, _mm256_and_si256(qq,
-                    _mm256_cmpeq_epi16(y, _mm256_setzero_si256())));
+                y,
+                _mm256_and_si256(qq, _mm256_cmpeq_epi16(y, _mm256_setzero_si256())),
+            );
             _mm256_storeu_si256(ap.wrapping_add(i), y);
         }
     } else {
@@ -430,8 +425,9 @@ unsafe fn NTT32(ya0: __m256i, ya1: __m256i, k: usize) -> (__m256i, __m256i) {
     let g1_0 = GM[(k << 1) + 0] as i16;
     let g1_1 = GM[(k << 1) + 1] as i16;
     let yg1 = _mm256_setr_epi16(
-        g1_0, g1_0, g1_0, g1_0, g1_0, g1_0, g1_0, g1_0,
-        g1_1, g1_1, g1_1, g1_1, g1_1, g1_1, g1_1, g1_1);
+        g1_0, g1_0, g1_0, g1_0, g1_0, g1_0, g1_0, g1_0, g1_1, g1_1, g1_1, g1_1, g1_1, g1_1, g1_1,
+        g1_1,
+    );
     let yt2 = mq_mmul_x16(yt2, yg1);
     let ya0 = mq_add_x16(yt1, yt2);
     let ya1 = mq_sub_x16(yt1, yt2);
@@ -443,8 +439,11 @@ unsafe fn NTT32(ya0: __m256i, ya1: __m256i, k: usize) -> (__m256i, __m256i) {
     let yt1 = _mm256_unpacklo_epi64(ya0, ya1);
     let yt2 = _mm256_unpackhi_epi64(ya0, ya1);
     let yg2 = _mm256_setr_epi64x(
-        GM[(k << 2) + 0] as i64, GM[(k << 2) + 1] as i64,
-        GM[(k << 2) + 2] as i64, GM[(k << 2) + 3] as i64);
+        GM[(k << 2) + 0] as i64,
+        GM[(k << 2) + 1] as i64,
+        GM[(k << 2) + 2] as i64,
+        GM[(k << 2) + 3] as i64,
+    );
     let yg2 = _mm256_or_si256(yg2, _mm256_slli_epi64(yg2, 32));
     let yg2 = _mm256_or_si256(yg2, _mm256_slli_epi32(yg2, 16));
     let yt2 = mq_mmul_x16(yt2, yg2);
@@ -471,8 +470,9 @@ unsafe fn NTT32(ya0: __m256i, ya1: __m256i, k: usize) -> (__m256i, __m256i) {
 
     // t = 2, m = 16
     let ysk = _mm256_setr_epi8(
-        0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
-        0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15);
+        0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15, 0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7,
+        10, 11, 14, 15,
+    );
     let yt3 = _mm256_shuffle_epi8(ya0, ysk);
     let yt4 = _mm256_shuffle_epi8(ya1, ysk);
     let yt1 = _mm256_unpacklo_epi16(yt3, yt4);
@@ -513,10 +513,8 @@ pub unsafe fn mqpoly_int_to_NTT(logn: u32, a: &mut [u16]) {
                     let y1 = _mm256_loadu_si256(ap.wrapping_add(j1));
                     let y2 = _mm256_loadu_si256(ap.wrapping_add(j2));
                     let y2 = mq_mmul_x16(y2, ys);
-                    _mm256_storeu_si256(ap.wrapping_add(j1),
-                        mq_add_x16(y1, y2));
-                    _mm256_storeu_si256(ap.wrapping_add(j2),
-                        mq_sub_x16(y1, y2));
+                    _mm256_storeu_si256(ap.wrapping_add(j1), mq_add_x16(y1, y2));
+                    _mm256_storeu_si256(ap.wrapping_add(j2), mq_sub_x16(y1, y2));
                 }
                 j0 += t;
             }
@@ -565,8 +563,9 @@ unsafe fn iNTT32(ya0: __m256i, ya1: __m256i, k: usize) -> (__m256i, __m256i) {
     // yt2:  8  9 10 11 12 13 14 15 | 24 25 26 27 28 29 30 31
 
     let ysk = _mm256_setr_epi8(
-        0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
-        0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15);
+        0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15, 0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7,
+        10, 11, 14, 15,
+    );
     let yt3 = _mm256_shuffle_epi8(yt1, ysk);
     let yt4 = _mm256_shuffle_epi8(yt2, ysk);
 
@@ -577,8 +576,10 @@ unsafe fn iNTT32(ya0: __m256i, ya1: __m256i, k: usize) -> (__m256i, __m256i) {
     let yt2 = _mm256_unpackhi_epi64(yt3, yt4);
     let ya0 = mq_half_x16(mq_add_x16(yt1, yt2));
     let igp: *const __m256i = transmute((&iGM).as_ptr());
-    let ya1 = mq_mmul_x16(mq_sub_x16(yt1, yt2),
-            _mm256_loadu_si256(igp.wrapping_add(k)));
+    let ya1 = mq_mmul_x16(
+        mq_sub_x16(yt1, yt2),
+        _mm256_loadu_si256(igp.wrapping_add(k)),
+    );
 
     // ya0:  0  2  4  6  8 10 12 14 | 16 18 20 22 24 26 28 30
     // ya1:  1  3  5  7  9 11 13 15 | 17 19 21 23 25 27 29 31
@@ -597,8 +598,11 @@ unsafe fn iNTT32(ya0: __m256i, ya1: __m256i, k: usize) -> (__m256i, __m256i) {
     let yt1 = _mm256_blend_epi16(ya0, _mm256_slli_epi64(ya1, 32), 0xCC);
     let yt2 = _mm256_blend_epi16(_mm256_srli_epi64(ya0, 32), ya1, 0xCC);
     let yig2 = _mm256_setr_epi64x(
-        iGM[(k << 2) + 0] as i64, iGM[(k << 2) + 1] as i64,
-        iGM[(k << 2) + 2] as i64, iGM[(k << 2) + 3] as i64);
+        iGM[(k << 2) + 0] as i64,
+        iGM[(k << 2) + 1] as i64,
+        iGM[(k << 2) + 2] as i64,
+        iGM[(k << 2) + 3] as i64,
+    );
     let yig2 = _mm256_or_si256(yig2, _mm256_slli_epi64(yig2, 32));
     let yig2 = _mm256_or_si256(yig2, _mm256_slli_epi32(yig2, 16));
     let ya0 = mq_half_x16(mq_add_x16(yt1, yt2));
@@ -612,8 +616,9 @@ unsafe fn iNTT32(ya0: __m256i, ya1: __m256i, k: usize) -> (__m256i, __m256i) {
     let ig1_0 = iGM[(k << 1) + 0] as i16;
     let ig1_1 = iGM[(k << 1) + 1] as i16;
     let yig1 = _mm256_setr_epi16(
-        ig1_0, ig1_0, ig1_0, ig1_0, ig1_0, ig1_0, ig1_0, ig1_0,
-        ig1_1, ig1_1, ig1_1, ig1_1, ig1_1, ig1_1, ig1_1, ig1_1);
+        ig1_0, ig1_0, ig1_0, ig1_0, ig1_0, ig1_0, ig1_0, ig1_0, ig1_1, ig1_1, ig1_1, ig1_1, ig1_1,
+        ig1_1, ig1_1, ig1_1,
+    );
     let ya0 = mq_half_x16(mq_add_x16(yt1, yt2));
     let ya1 = mq_mmul_x16(mq_sub_x16(yt1, yt2), yig1);
 
@@ -661,10 +666,8 @@ pub unsafe fn mqpoly_NTT_to_int(logn: u32, a: &mut [u16]) {
                     let j2 = j1 + t;
                     let y1 = _mm256_loadu_si256(ap.wrapping_add(j1));
                     let y2 = _mm256_loadu_si256(ap.wrapping_add(j2));
-                    _mm256_storeu_si256(ap.wrapping_add(j1),
-                        mq_half_x16(mq_add_x16(y1, y2)));
-                    _mm256_storeu_si256(ap.wrapping_add(j2),
-                        mq_mmul_x16(ys, mq_sub_x16(y1, y2)));
+                    _mm256_storeu_si256(ap.wrapping_add(j1), mq_half_x16(mq_add_x16(y1, y2)));
+                    _mm256_storeu_si256(ap.wrapping_add(j2), mq_mmul_x16(ys, mq_sub_x16(y1, y2)));
                 }
                 j0 += dt;
             }
@@ -808,12 +811,9 @@ pub unsafe fn mqpoly_sqnorm(logn: u32, a: &[u16]) -> u32 {
         ysat = _mm256_or_si256(ysat, ys);
         ys = _mm256_add_epi32(ys, _mm256_bsrli_epi128(ys, 8));
         ysat = _mm256_or_si256(ysat, ys);
-        let xs = _mm_add_epi32(
-            _mm256_castsi256_si128(ys),
-            _mm256_extracti128_si256(ys, 1));
+        let xs = _mm_add_epi32(_mm256_castsi256_si128(ys), _mm256_extracti128_si256(ys, 1));
         let r = _mm_cvtsi128_si32(xs) as u32;
-        let sat = ((_mm256_movemask_epi8(ysat) as u32) & 0x88888888)
-            | (r & 0x80000000);
+        let sat = ((_mm256_movemask_epi8(ysat) as u32) & 0x88888888) | (r & 0x80000000);
         return r | ((((sat | sat.wrapping_neg()) as i32) >> 31) as u32);
     } else {
         let mut s = 0u32;
@@ -848,9 +848,7 @@ pub unsafe fn signed_poly_sqnorm(logn: u32, a: &[i16]) -> u32 {
         }
         ys = _mm256_add_epi32(ys, _mm256_srli_epi64(ys, 32));
         ys = _mm256_add_epi32(ys, _mm256_bsrli_epi128(ys, 8));
-        let xs = _mm_add_epi32(
-            _mm256_castsi256_si128(ys),
-            _mm256_extracti128_si256(ys, 1));
+        let xs = _mm_add_epi32(_mm256_castsi256_si128(ys), _mm256_extracti128_si256(ys, 1));
         return _mm_cvtsi128_si32(xs) as u32;
     } else {
         let mut s = 0;
@@ -863,7 +861,7 @@ pub unsafe fn signed_poly_sqnorm(logn: u32, a: &[i16]) -> u32 {
 }
 
 // NTT factors: already defined in mq.rs.
-use super::mq::{GM, iGM};
+use super::mq::{iGM, GM};
 
 #[cfg(test)]
 mod tests {
@@ -872,12 +870,20 @@ mod tests {
     #[inline]
     fn qadd(a: u32, b: u32) -> u32 {
         let c = a + b;
-        if c >= 12289 { c - 12289 } else { c }
+        if c >= 12289 {
+            c - 12289
+        } else {
+            c
+        }
     }
 
     #[inline]
     fn qsub(a: u32, b: u32) -> u32 {
-        if a >= b { a - b } else { (a + 12289) - b }
+        if a >= b {
+            a - b
+        } else {
+            (a + 12289) - b
+        }
     }
 
     #[inline]
@@ -968,15 +974,13 @@ mod tests {
                 if crate::has_avx2() {
                     for x in 1..10 {
                         for y in 1..12289 {
-                            let zz = mq_div_x16(
-                                _mm256_set1_epi16(x), _mm256_set1_epi16(y));
+                            let zz = mq_div_x16(_mm256_set1_epi16(x), _mm256_set1_epi16(y));
                             let zb: [i16; 16] = core::mem::transmute(zz);
                             let r = mq_div(x as u32, y as u32) as i16;
                             assert!(zb == [r; 16]);
                         }
 
-                        let zz = mq_div_x16(
-                            _mm256_set1_epi16(x), _mm256_set1_epi16(12289));
+                        let zz = mq_div_x16(_mm256_set1_epi16(x), _mm256_set1_epi16(12289));
                         let zb: [i16; 16] = core::mem::transmute(zz);
                         assert!(zb == [12289i16; 16]);
                     }

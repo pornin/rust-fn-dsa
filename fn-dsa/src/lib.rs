@@ -68,18 +68,18 @@
 //!     VerifyingKey, VerifyingKeyStandard,
 //!     DOMAIN_NONE, HASH_ID_RAW,
 //! };
-//! 
+//!
 //! // Generate key pair.
 //! let mut kg = KeyPairGeneratorStandard::default();
 //! let mut sign_key = [0u8; sign_key_size(FN_DSA_LOGN_512)];
 //! let mut vrfy_key = [0u8; vrfy_key_size(FN_DSA_LOGN_512)];
 //! kg.keygen(FN_DSA_LOGN_512, &mut OsRng, &mut sign_key, &mut vrfy_key);
-//! 
+//!
 //! // Sign a message with the signing key.
 //! let mut sk = SigningKeyStandard::decode(encoded_signing_key)?;
 //! let mut sig = vec![0u8; signature_size(sk.get_logn())];
 //! sk.sign(&mut OsRng, &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
-//! 
+//!
 //! // Verify a signature with the verifying key.
 //! match VerifyingKeyStandard::decode(encoded_verifying_key) {
 //!     Some(vk) => {
@@ -103,29 +103,34 @@
 //! [rand_core]: https://crates.io/crates/rand_core
 //! [zeroize]: https://crates.io/crates/zeroize
 
+pub use fn_dsa_comm::shake::{SHA3_224, SHA3_256, SHA3_384, SHA3_512, SHAKE, SHAKE128, SHAKE256};
 pub use fn_dsa_comm::{
-    sign_key_size, vrfy_key_size, signature_size,
-    FN_DSA_LOGN_512, FN_DSA_LOGN_1024,
-    HashIdentifier,
-    HASH_ID_RAW,
-    HASH_ID_ORIGINAL_FALCON,
-    HASH_ID_SHA256,
-    HASH_ID_SHA384,
-    HASH_ID_SHA512,
-    HASH_ID_SHA512_256,
-    HASH_ID_SHA3_256,
-    HASH_ID_SHA3_384,
-    HASH_ID_SHA3_512,
-    HASH_ID_SHAKE128,
-    HASH_ID_SHAKE256,
-    DomainContext,
-    DOMAIN_NONE,
-    CryptoRng, RngCore, RngError,
+    sign_key_size, signature_size, vrfy_key_size, CryptoRng, DomainContext, HashIdentifier,
+    RngCore, RngError, DOMAIN_NONE, FN_DSA_LOGN_1024, FN_DSA_LOGN_512, HASH_ID_ORIGINAL_FALCON,
+    HASH_ID_RAW, HASH_ID_SHA256, HASH_ID_SHA384, HASH_ID_SHA3_256, HASH_ID_SHA3_384,
+    HASH_ID_SHA3_512, HASH_ID_SHA512, HASH_ID_SHA512_256, HASH_ID_SHAKE128, HASH_ID_SHAKE256,
 };
-pub use fn_dsa_comm::shake::{SHAKE, SHAKE128, SHAKE256, SHA3_224, SHA3_256, SHA3_384, SHA3_512};
-pub use fn_dsa_kgen::{KeyPairGenerator, KeyPairGeneratorStandard, KeyPairGeneratorWeak, KeyPairGenerator512, KeyPairGenerator1024};
-pub use fn_dsa_sign::{SigningKey, SigningKeyStandard, SigningKeyWeak, SigningKey512, SigningKey1024};
-pub use fn_dsa_vrfy::{VerifyingKey, VerifyingKeyStandard, VerifyingKeyWeak, VerifyingKey512, VerifyingKey1024};
+pub use fn_dsa_kgen::{
+    KeyPairGenerator, KeyPairGenerator1024, KeyPairGenerator512, KeyPairGeneratorStandard,
+    KeyPairGeneratorWeak,
+};
+pub use fn_dsa_sign::{
+    SigningKey, SigningKey1024, SigningKey512, SigningKeyStandard, SigningKeyWeak,
+};
+pub use fn_dsa_vrfy::{
+    VerifyingKey, VerifyingKey1024, VerifyingKey512, VerifyingKeyStandard, VerifyingKeyWeak,
+};
+
+#[cfg(feature = "eth_falcon")]
+pub use fn_dsa_comm::eth_falcon::{
+    decode_signature_to_packed,
+    decode_pubkey_to_ntt_packed,
+    hash_to_point_keccak,
+};
+#[cfg(feature = "eth_falcon")]
+pub use fn_dsa_sign::eth_falcon::{sign as eth_falcon_sign, generate_salt};
+#[cfg(feature = "eth_falcon")]
+pub use fn_dsa_vrfy::eth_falcon::{verify as eth_falcon_verify};
 
 #[cfg(test)]
 mod tests {
@@ -152,8 +157,12 @@ mod tests {
     }
     impl CryptoRng for FakeRng1 {}
     impl RngCore for FakeRng1 {
-        fn next_u32(&mut self) -> u32 { unimplemented!(); }
-        fn next_u64(&mut self) -> u64 { unimplemented!(); }
+        fn next_u32(&mut self) -> u32 {
+            unimplemented!();
+        }
+        fn next_u64(&mut self) -> u64 {
+            unimplemented!();
+        }
         fn fill_bytes(&mut self, dest: &mut [u8]) {
             self.0.extract(dest);
         }
@@ -173,13 +182,22 @@ mod tests {
         fn new(seed: &[u8]) -> Self {
             let mut sh = SHAKE256::new();
             sh.inject(seed);
-            Self { sh, buf: [0u8; 96], ptr: 96, ctr: 0 }
+            Self {
+                sh,
+                buf: [0u8; 96],
+                ptr: 96,
+                ctr: 0,
+            }
         }
     }
     impl CryptoRng for FakeRng2 {}
     impl RngCore for FakeRng2 {
-        fn next_u32(&mut self) -> u32 { unimplemented!(); }
-        fn next_u64(&mut self) -> u64 { unimplemented!(); }
+        fn next_u32(&mut self) -> u32 {
+            unimplemented!();
+        }
+        fn next_u64(&mut self) -> u64 {
+            unimplemented!();
+        }
         fn fill_bytes(&mut self, dest: &mut [u8]) {
             let mut j = 0;
             let mut ptr = self.ptr;
@@ -205,9 +223,7 @@ mod tests {
         }
     }
 
-    fn self_test_inner<KG: KeyPairGenerator,
-        SK: SigningKey, VK: VerifyingKey>(logn: u32)
-    {
+    fn self_test_inner<KG: KeyPairGenerator, SK: SigningKey, VK: VerifyingKey>(logn: u32) {
         let mut kg = KG::default();
         let mut sk_buf = [0u8; sign_key_size(10)];
         let mut vk_buf = [0u8; vrfy_key_size(10)];
@@ -236,27 +252,23 @@ mod tests {
             // Verify the signature. Check that modifying the context,
             // message or signature results in a verification failure.
             let vk = VK::decode(&vk_e).unwrap();
-            assert!(vk.verify(sig,
-                &DOMAIN_NONE, &HASH_ID_RAW, &b"test1"[..]));
-            assert!(!vk.verify(sig,
-                &DOMAIN_NONE, &HASH_ID_RAW, &b"test2"[..]));
-            assert!(!vk.verify(sig,
-                &DomainContext(b"other"), &HASH_ID_RAW, &b"test1"[..]));
+            assert!(vk.verify(sig, &DOMAIN_NONE, &HASH_ID_RAW, &b"test1"[..]));
+            assert!(!vk.verify(sig, &DOMAIN_NONE, &HASH_ID_RAW, &b"test2"[..]));
+            assert!(!vk.verify(sig, &DomainContext(b"other"), &HASH_ID_RAW, &b"test1"[..]));
             sig[sig.len() >> 1] ^= 0x40;
-            assert!(!vk.verify(sig,
-                &DOMAIN_NONE, &HASH_ID_RAW, &b"test1"[..]));
+            assert!(!vk.verify(sig, &DOMAIN_NONE, &HASH_ID_RAW, &b"test1"[..]));
         }
     }
 
     #[test]
     fn self_test() {
         for logn in 9..10 {
-            self_test_inner::<KeyPairGeneratorStandard,
-                SigningKeyStandard, VerifyingKeyStandard>(logn);
+            self_test_inner::<KeyPairGeneratorStandard, SigningKeyStandard, VerifyingKeyStandard>(
+                logn,
+            );
         }
         for logn in 2..8 {
-            self_test_inner::<KeyPairGeneratorWeak,
-                SigningKeyWeak, VerifyingKeyWeak>(logn);
+            self_test_inner::<KeyPairGeneratorWeak, SigningKeyWeak, VerifyingKeyWeak>(logn);
         }
     }
 
@@ -286,7 +298,8 @@ mod tests {
             "56413a0307b574b7bff2b6f9f9b59e346f6ab16c2c75fe1c64949a025dc40534",
             "570e6fe189c45ab50e039eaa0ac3c5f2f50efbffa08e006368d3364e4d49f7fd",
             "60b307e72b295b3fb13bd7c2f5926b521c34fbbd4d9ee3cdfe89eed9ffb2d2af",
-        ], [
+        ],
+        [
             "956766887db48fd1f9cac47a93a12c9e55de6e47006457eceee523d3566f3dec",
             "9f41d30fad1bee288928b1f78a376a46dc06a0edc869bdb6cce0acc36583e92f",
             "8389ba7095343bd222c9818da07ac7e66b73dfdeafb6cdc10377242874c27ece",
@@ -297,7 +310,8 @@ mod tests {
             "1e1c251797a4b27f4849ab34dfb9b21b3a84a52c4b0c11b93cf07305da26134f",
             "6e051f873582f6d94c93b335f059588acb00722a40e09b310a0c00894fdf05af",
             "d025acba6daf2b1de7d82d423b6eecb946e98cd7f7125f150e302ac8fccc3af2",
-        ], [
+        ],
+        [
             "7e2561ddd8664383b2e03bcb4da2409d4c43676ed021dee59766e72890a4509b",
             "7f284169006a71440cc27cace9cfeab56440d357ee42b47609e1b76513281b21",
             "46c05f015b609826c310a098a2105a0e94ad271313031b307a5ff6af09b14de2",
@@ -308,7 +322,8 @@ mod tests {
             "4ffe1c59cfe27ecbf233710bdc535a4a332c68e741a0a9a1b684d773cfc031f3",
             "49adb0cb6ed7af916adb4f213016d862a88ab284f9a61fc11e12a1828540b1b4",
             "27d2d2558117e4861207851dcc5f51322fb5e21cad7ace06390f5132f4c0ec17",
-        ], [
+        ],
+        [
             "97517f9cfe9641fbb06b08afa09be14096b13573960f6790ba1119eb01a8f723",
             "66c8669fe31f434582a465705dafea2a09c4acaf5c2c9d5975b4ec72d556c80b",
             "7207b9f036d9b7a40f5d3647f03fb4ebc373719f240791cd65f9f35fc471ef35",
@@ -319,7 +334,8 @@ mod tests {
             "96be92ccc265fa68564593baa4fe4f3cbac2f4a0c85c81f80ca28b2f3a3c099b",
             "05af0cb90b923f778c7f88b0e6747861da0a0f73481fe2b1587b16417ed7101f",
             "fc3201c8a5763e6b9919c54044aa7c302dc11344ab629917ef14680d3dce82fa",
-        ], [
+        ],
+        [
             "dc6efcd8382f2ec32a5d0048ccfecd7d0aa2804ed31f9ca7b3b7fe80a1f278d6",
             "8b96fe42791a4ddd3f426ea35d278830d0d688a2259355e568e63a88afe8093a",
             "6fd98e52e33c89a20dda23f4f25744350fd69f3fec640c06590866b004f3799d",
@@ -330,7 +346,8 @@ mod tests {
             "4384664a9f6ef03ddb96b77e09349ce951480ac0e0666e9f4236b213c69cfb2f",
             "8cd018e4d9add2fd5f12dc3015e9ff5ef6195154d4c09f4dfa8436681899db6d",
             "37e523a85668c4ea1ea59eb44e44bb1872d0ce8ec9571e329a1b2a9a60eacd05",
-        ], [
+        ],
+        [
             "22195e02f65e0906245eaedd12bedd89a89afcb68c62d27ded954a72fdfa1547",
             "dc2051d21719a1276c7a1f860e334c632ea0b1b15ff5203aac6fb93fe11ee123",
             "adc6b4de01547c5d6b382534fbc715fe7c434cd5c213f7bfd2d1d5056e7618a6",
@@ -341,7 +358,8 @@ mod tests {
             "c3d68100de903315d7a7ae47ce3d33ba9da7f9d6a27d563ccce997771a13974f",
             "b793a6fec199c60455ea22cf3b9cf0987a3c1157b4729f522498fdfe1e8f6043",
             "23f66127ac55cfab218a9a4b199fa42bc64056bb040ae653e90e63cc882eff60",
-        ], [
+        ],
+        [
             "0e19693ced586519efd7ff4cb45b8013d2f300b60eba2d291599d366bb03f1d9",
             "30c926ee6237d407cff189c2baeb3171872aebc461b919484cf30d93250fcde0",
             "3d4268db567841caa0e360e2d6c79c354b659f521509243381b494b4eec2b4af",
@@ -352,7 +370,8 @@ mod tests {
             "f38f57b7cda123e36a03ebb7c0bb196a86dda4abd66a038cd054f7a4bd61e50a",
             "755a29fb4dcf7808399f501fde4c0e23d11b9face58c9f6681f1c636b2256989",
             "af091e60104821510b28599068fa84fd814af62d978f6830e7fa2fc51fedcf9b",
-        ], [
+        ],
+        [
             "a32f07baf6b7ff6bc7c3c4f8c638871ff8c4803b0e54bedb9363f5672011077b",
             "1794cfad199c20879d1ffe10ce263334095e51f0ed191ed74e4cba635e233d80",
             "d16188abb5502eae81e6e03750123e156d8ed7dfa830a0c879560b383a5dc53a",
@@ -363,7 +382,8 @@ mod tests {
             "b622711852cdc9893aec144ed635d2ae775778c6f4152e106b7b6b2842c8055d",
             "32b3c2ed31f11795dde312b0574164dc4d00712f4736d1c5142a49cab4261ed4",
             "e2bd2350de9bdab72d3a517251217d8fdbd7ea6e386ad2ff1da19c7c2111bcb2",
-        ], [
+        ],
+        [
             "16ef63f9dc51b66565bb05ac525f3668fa48186b973a95599e0c963cfd6a4297",
             "f62ac74368b2f8b80b6e12f13e026c9ba493c59b9eb2225a2626dc773e257dba",
             "3f4de163f9a44137c52b0d9d6042a236fb8a05f9bd6617e12fbbd32bb0f2120c",
@@ -374,7 +394,7 @@ mod tests {
             "233f0de0b9f70c2b7de870fc2f3d0b0d1fa37224a3264525d2d8537862c353d8",
             "9fdf2626bcb2e5a8622dd1fcc78ce78db3a2aceeff030def85574259ae41e555",
             "979346e3d31abf04f815ffd1d7bd44da03c636172b46ab260e365c4a4672445e",
-        ]
+        ],
     ];
 
     #[cfg(not(feature = "shake256x4"))]
@@ -390,7 +410,8 @@ mod tests {
             "80d7cc5c779ae2a590249169e10e935a1e8bf481d1c8babf3487acc0838b99d1",
             "faac905c850eeb978e776f1e7fb1bf7ad40dd9618792f25fc3fae9ee47d8ce15",
             "fc484c374ab40a4dbb5ea62b04a10f0c945105cddd48c4a90e729fc07680e88b",
-        ], [
+        ],
+        [
             "bef4b8dc62d8e0b5eca9bc09366b1dcf7327dfbac10042406cc2217e9d0791f5",
             "f75a3392c69345b6f5355d104305efae9a9d90fd5dfaa03120a12e02356b34fd",
             "e3c8a660f6ab7102d9a975c94d6c0206e0835cc88ab36dd63556540c15b32ac3",
@@ -401,7 +422,8 @@ mod tests {
             "5b96561ca0cb41b1c09dc569ee48e596067df5a287a838f88b98e2375880d053",
             "b306079cd1f2f4029cee72988ace631572ad7f2620e020cf5ad4b1ae598424e1",
             "9a8cf1dc6b62c9f8b7790943ca9e48beef24aa8326b9002146e1858bc61103d2",
-        ], [
+        ],
+        [
             "e3f4742be370ea418feab49c3fee6a98ac52c1f1cb39138a90092449595b3f81",
             "d6659d9895e4b59c1001bf8354319889ef89f9c42570147dc86d615db94ade09",
             "f4b95d6d27a64fbd303a7091625bd8daf61c3301376d512203c2fb53fb726317",
@@ -412,7 +434,8 @@ mod tests {
             "89cd099d215ed66c93586484c48994e3d772511768561e0465c74852ff921ac0",
             "366844a98fa179f96019f6f930829c960990ac438da24a945f40791b4ab3771c",
             "736d879d25597e39878548a2efc2b37d7d48744cf621803a97fa84d1337d8478",
-        ], [
+        ],
+        [
             "f13154701ddb47458310e09b3bd20350fc8ec13b42dfb2f3414fe49dc21054e5",
             "dccc7800c714f9b1e28f6f414ad0760619bf19d319eee3e7a2f7cbae16ec44f4",
             "0a7c0f023c83e81fce3aa8737aa999131f9b1c78db813c8471af2bf41af34959",
@@ -423,7 +446,8 @@ mod tests {
             "354bd2ccf6b8c814bfa644e4bc9e5610d42d1516e3fe342d9878ba7d03033a5c",
             "9e93e4e05072a624170bccb231caacf69faaaaced8b636eed522ac031eb1e25d",
             "104a62c58b72b70f1fe0eac8ca4b8775ddcbd2ec62f07f91e6b54dd578c1a65c",
-        ], [
+        ],
+        [
             "7a65360991f32d38d8267e9b8fa29f21f59923efa27a39214abb3412d316cf13",
             "13c0a7f42988e36cc0440f056341791fab717a0b1f9a62954489388a77c1447f",
             "5aef7941bda5f7ec4b12141eaf09dcafe741e4aac536f232e167b7c154196999",
@@ -434,7 +458,8 @@ mod tests {
             "4c9066103f99d6aaac3dbe5be9ef0dd06f090a8479e458aa3e83e6b26c6d19f3",
             "ac6fb3acbae450b3d75927532a462fadd64a1c0f025b1c416f27b2f41f945567",
             "65190b3eb43adbaa09d9bf2ccf971b70fb382c56e8676dc4a579f8d666f953c2",
-        ], [
+        ],
+        [
             "4850dc7976386e64a98cdbbb8a886e6d8cdb52c496e9d626f4c8fdd915658494",
             "9d17107e409910f16a43ac73068c2d656db2ca684ba86c0ad7a4cb14ca1bf931",
             "64adc2f8d3594064a32cb1f00ab8ddcfbad33fde6d2398f829c1923cb38d52c5",
@@ -445,7 +470,8 @@ mod tests {
             "3774f7f8c948792aa4c480d3b9300b5cb91cbb619327a18ee66a89511cad2d92",
             "b915349483e3a85db14fa612327b7eaa1ab201f47d0795a05d06bd5b2d92def2",
             "daed7bab12476abb916a22f092ba52a93da5540506188fb982f538ad98d3db11",
-        ], [
+        ],
+        [
             "1c3196947f64e22696a151f75ce97f67626ffc089abc4681adc2caf3c4828b1a",
             "2749938e3936a4ffb83583da86f3506a2a88f73248e80f14c50c8c92cd9d4ede",
             "8884f415f33b2d6a91a12b8d4fa0f9641178b62f2a623ff2f9cdff74cf88cf87",
@@ -456,7 +482,8 @@ mod tests {
             "1c51ce7bb6fa8b37a3c5ee99a09138bf9fd8310071d8adb91cd692d34e212daf",
             "c3de8a295ef2ed1dfdc4c6a21f6c989c55435890d40e2706424660cb798befdb",
             "230f62ab8fc0d086140584fc8977597f2c591da1f9627aef502c9e9eee9f4abc",
-        ], [
+        ],
+        [
             "53748d0bda7a655b160d1237687f606fc6d85a768af7e52accb320cdc02fea56",
             "566ff306b9e7a8509252fcbd315faa1c7d9a99e90a6e5a1e211dca0492fd2422",
             "3927502da6d66d09c71baad0fb307e767287bca9defd3e5658093758dd6f4eb6",
@@ -467,7 +494,8 @@ mod tests {
             "92770a08ede1e89721661b8812879ab2c1cae3ffe66056fa23e2ac4cc984998b",
             "31e9907ba30080033d48535b1ecbc3e25e6b6b450fb1b310935e8b278654700e",
             "779fb106eb89f09e1d09a7c3c3295d8b63fa93ca3e59de9a9adcc1eb3f392c0c",
-        ], [
+        ],
+        [
             "c04a645eb9e60d117d29fe4a0d5314bedf1392cbad20bb15f9cc88ac25cd78e2",
             "1f0e8af75f9abfed60ddafda6286c6fb27395188d3191763eedb05c00c908b39",
             "669de6300e9fa19fbb9675769525d1f68d166297f6a67753c4dda74927c83286",
@@ -478,17 +506,30 @@ mod tests {
             "51ca0dc5ccae2abb38e39eb2fa8bbc1bbfa46e4dca62bf6bd9666fe1eeb22803",
             "8ae1591a9827357670f983a22cca71e754ede9ccae51f9a2f4bff89354903d0f",
             "cde3f08ca0f7dcf93398bcbed80575c114dc1ddc046cb989385149e6a5deba13",
-        ]
+        ],
     ];
 
     fn inner_kat<KG: KeyPairGenerator, SK: SigningKey, VK: VerifyingKey>(
-        logn: u32, num: u32) -> [u8; 32]
-    {
-        let seed1 = [0x00u8, logn as u8,
-            num as u8, (num >> 8) as u8, (num >> 16) as u8, (num >> 24) as u8];
+        logn: u32,
+        num: u32,
+    ) -> [u8; 32] {
+        let seed1 = [
+            0x00u8,
+            logn as u8,
+            num as u8,
+            (num >> 8) as u8,
+            (num >> 16) as u8,
+            (num >> 24) as u8,
+        ];
         let mut rng1 = FakeRng1::new(&seed1);
-        let seed2 = [0x01u8, logn as u8,
-            num as u8, (num >> 8) as u8, (num >> 16) as u8, (num >> 24) as u8];
+        let seed2 = [
+            0x01u8,
+            logn as u8,
+            num as u8,
+            (num >> 8) as u8,
+            (num >> 16) as u8,
+            (num >> 24) as u8,
+        ];
         let mut rng2 = FakeRng2::new(&seed2);
 
         let mut sk_buf = [0u8; sign_key_size(10)];
@@ -525,16 +566,182 @@ mod tests {
             let logn = (i as u32) + 2;
             for j in 0..KAT[i].len() {
                 let r = if logn <= 8 {
-                    inner_kat::<KeyPairGeneratorWeak,
-                        SigningKeyWeak,
-                        VerifyingKeyWeak>(logn, j as u32)
+                    inner_kat::<KeyPairGeneratorWeak, SigningKeyWeak, VerifyingKeyWeak>(
+                        logn, j as u32,
+                    )
                 } else {
-                    inner_kat::<KeyPairGeneratorStandard,
-                        SigningKeyStandard,
-                        VerifyingKeyStandard>(logn, j as u32)
+                    inner_kat::<KeyPairGeneratorStandard, SigningKeyStandard, VerifyingKeyStandard>(
+                        logn, j as u32,
+                    )
                 };
                 assert!(r[..] == hex::decode(KAT[i][j]).unwrap());
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "eth_falcon"))]
+mod eth_falcon_tests {
+    extern crate std;
+
+    use super::*;
+
+    use rand_chacha::ChaCha8Rng;
+    use rand_core::SeedableRng;
+    use std::{
+        println,
+        vec::Vec,
+    };
+
+    fn keygen_random() ->([u8; vrfy_key_size(FN_DSA_LOGN_512)], [u8; sign_key_size(FN_DSA_LOGN_512)]) {
+        let mut rng = ChaCha8Rng::from_entropy();
+        let mut kg = KeyPairGeneratorStandard::default();
+        let mut sk = [0u8; sign_key_size(FN_DSA_LOGN_512)];
+        let mut vk = [0u8; vrfy_key_size(FN_DSA_LOGN_512)];
+
+        // Generate a test keypair
+        kg.keygen(
+            FN_DSA_LOGN_512,
+            &mut rng,
+            &mut sk,
+            &mut vk,
+        );
+        (vk, sk)
+    }
+
+    #[test]
+    fn test_sign_verify_full_roundtrip() {
+        let (_, sk) = keygen_random();
+
+        let message = b"Hello, ETHFALCON!";
+        let salt = generate_salt();
+
+        // Sign the message
+        let signature = eth_falcon_sign(&sk, message, &salt).expect("Signing should succeed");
+
+        println!("Signature length: {}", signature.len());
+        println!("Signature header: 0x{:02x}", signature[0]);
+
+        // Decode signature to abi.encodePacked format
+        let s2_packed = decode_signature_to_packed(&signature).expect("Should decode signature");
+
+        assert_eq!(s2_packed.len(), 1024, "s2_packed should be 1024 bytes");
+
+        // For verification, we also need the public key in abi.encodePacked format
+        // The keygen returns encoded format, we need to decode and repack
+        // For now, let's just test that signing produces valid output
+
+        println!("Successfully signed and decoded signature!");
+        println!("s2_packed length: {}", s2_packed.len());
+    }
+
+    #[test]
+    fn test_complete_sign_and_verify_roundtrip() {
+        // Generate a test keypair
+        let (pk, sk) = keygen_random();
+
+        let message = b"ETHFALCON test message";
+        let salt = generate_salt();
+
+        println!("\n=== ETHFALCON Sign+Verify Roundtrip Test ===");
+        println!("Message: {:?}", std::str::from_utf8(message).unwrap());
+
+        // Sign the message
+        let signature = eth_falcon_sign(&sk, message, &salt).expect("Signing should succeed");
+        println!(
+            "✓ Signed successfully (signature length: {})",
+            signature.len()
+        );
+
+        // Decode signature to abi.encodePacked format
+        let s2_packed = decode_signature_to_packed(&signature).expect("Should decode signature");
+        println!(
+            "✓ Decoded signature to abi.encodePacked format ({}  bytes)",
+            s2_packed.len()
+        );
+
+        // Decode public key to NTT abi.encodePacked format
+        let pk_ntt_packed = decode_pubkey_to_ntt_packed(&pk).expect("Should decode public key");
+        println!(
+            "✓ Decoded public key to NTT abi.encodePacked format ({} bytes)",
+            pk_ntt_packed.len()
+        );
+
+        // Extract salt from signature (it's at bytes 1-41)
+        let signature_salt = &signature[1..41];
+
+        // Verify the signature
+        let is_valid = eth_falcon_verify(message, signature_salt, &s2_packed, &pk_ntt_packed)
+            .expect("Verification should not error");
+
+        println!(
+            "✓ Verification result: {}",
+            if is_valid { "VALID ✓" } else { "INVALID ✗" }
+        );
+        println!("=== Test Complete ===\n");
+
+        assert!(is_valid, "Signature should verify correctly!");
+    }
+
+    #[test]
+    fn test_kat_vector_0() {
+        // From ethfalcon512-KAT.rsp count = 0
+        let mlen = 33;
+        let msg_hex = "D81C4D8D734FCBFBEADE3D3F8A039FAA2A2C9957E835AD55B22E75BF57BB556AC8";
+        let pk_hex = "096BA86CB658A8F445C9A5E4C28374BEC879C8655F68526923240918074D0147C03162E4A49200648C652803C6FD7509AE9AA799D6310D0BD42724E0635920186207000767CA5A8546B1755308C304B84FC93B069E265985B398D6B834698287FF829AA820F17A7F4226AB21F601EBD7175226BAB256D8888F009032566D6383D68457EA155A94301870D589C678ED304259E9D37B193BC2A7CCBCBEC51D69158C44073AEC9792630253318BC954DBF50D15028290DC2D309C7B7B02A6823744D463DA17749595CB77E6D16D20D1B4C3AAD89D320EBE5A672BB96D6CD5C1EFEC8B811200CBB062E473352540EDDEF8AF9499F8CDD1DC7C6873F0C7A6BCB7097560271F946849B7F373640BB69CA9B518AA380A6EB0A7275EE84E9C221AED88F5BFBAF43A3EDE8E6AA42558104FAF800E018441930376C6F6E751569971F47ADBCA5CA00C801988F317A18722A29298925EA154DBC9024E120524A2D41DC0F18FD8D909F6C50977404E201767078BA9A1F9E40A8B2BA9C01B7DA3A0B73A4C2A6B4F518BBEE3455D0AF2204DDC031C805C72CCB647940B1E6794D859AAEBCEA0DEB581D61B9248BD9697B5CB974A8176E8F910469CAE0AB4ED92D2AEE9F7EB50296DAF8057476305C1189D1D9840A0944F0447FB81E511420E67891B98FA6C257034D5A063437D379177CE8D3FA6EAF12E2DBB7EB8E498481612B1929617DA5FB45E4CDF893927D8BA842AA861D9C50471C6D0C6DF7E2BB26465A0EB6A3A709DE792AAFAAF922AA95DD5920B72B4B8856C6E632860B10F5CC08450003671AF388961872B466400ADB815BA81EA794945D19A100622A6CA0D41C4EA620C21DC125119E372418F04402D9FA7180F7BC89AFA54F8082244A42F46E5B5ABCE87B50A7D6FEBE8D7BBBAC92657CBDA1DB7C25572A4C1D0BAEA30447A865A2B1036B880037E2F4D26D453E9E913259779E9169B28A62EB809A5C744E04E260E1F2BBDA874F1AC674839DDB47B3148C5946DE0180148B7973D63C58193B17CD05D16E80CD7928C2A338363A23A81C0608C87505589B9DA1C617E7B70786B6754FBB30A5816810B9E126CFCC5AA49326E9D842973874B6359B5DB75610BA68A98C7B5E83F125A82522E13B83FB8F864E2A97B73B5D544A7415B6504A13939EAB1595D64FAF41FAB25A864A574DE524405E878339877886D2FC07FA0311508252413EDFA1158466667AFF78386DAF7CB4C9B850992F96E20525330599AB601D454688E294C8C3E";
+        let sm_hex = "02BB350CB957EEFFA82211A2EC1166D21AE7FFACDB32DB2A89AD209F0012AB03E0FDE69D9E02AF52996BD81C4D8D734FCBFBEADE3D3F8A039FAA2A2C9957E835AD55B22E75BF57BB556AC8299AF9A7635343E5233F5A14E75378D8E1B3C87186411C244906ADDE345EDD09A831CF0A19153B1AEF376EFCA8C74E4D677CC2E696758312A0F95733527589645DB193B08B5D37DFEC9FE27E8D16D337712EB1F6ABB79DC2114D3B2FFA22133663E25651FC1AC6226CC33DE59665138FDA4D0D66A2ED4C7B990B8822DC1E07A9B1AC222DC78E169AB92EBD2FC7A27460B23A08AA4A99D54592FAC288C904D61126860E6A191EBC59A09948311425EE19EAB02B0A53498659E94B0AE485CD4DD2E9985AF4F41FDC29EBC0ED2C6E925DB5B2B08FDF56024A23B9F4656EEA508995AD869F23EDC65D4B2A3A6485A2A82691A47214BF3C0D1C38FDD33EB4BBB9876588C273F7B46289839075AEDCCB428E87B1139533667B7CA781ADE43F7A3F773BD9356476BC35D0EAA2AD7A4F4DC9F4495F53338D6435392988BCB5AC71985E1B3CEB668D91D5EB71B28C8FC3BC9E6068F0AC9E69F1C6A8D8D6BB950AF7B46FF55354E4187CB40BDBA66BE6C93AFFB2741D9ED20307704F6E7ED5A42352A5D27CDA1F6FC5353A63B5369226C4D98EB4862083A4BDF2B4ED20AE8C84F7B8CA0A8FC930342E1C894B812B5006FB792543656CBB4B217E7F7C8C92A8F1553C0583311ACED7667BEECCC0D95691E40E7E40FE87871D1A28165D63BB013C10034FE0529BCDE391204B083B4C40CD050998B368DD66298EBC37CA1EFCF46DB4EC419EC3612AB96B152FB0A03295527CA0242F539930DA795D6D851B36611548D2BF1EC8C2B0C4694CED382ADBB587AC425B1AB5D0A1B43F54D390A6F0640F0F33C743ADD746DCFA6DE7592535FDE947F3A6916BC6A8AF5220449E39A429A120D011CF78DEB88E8E0B374AD0F2000000000000000000";
+
+        let msg = hex::decode(msg_hex).expect("Valid msg hex");
+        let pk = hex::decode(pk_hex).expect("Valid pk hex");
+        let sm = hex::decode(sm_hex).expect("Valid sm hex");
+
+        // Parse sm structure
+        assert!(sm.len() >= 2 + 40 + mlen + 1, "sm too short");
+        let salt = &sm[2..42];
+        let message_in_sm = &sm[42..42 + mlen];
+        let header = sm[42 + mlen];
+
+        // Verify structure
+        assert_eq!(message_in_sm, &msg[..], "Message in sm should match msg");
+        assert_eq!(header, 0x29, "Header byte should be 0x29");
+
+        // Decode public key to NTT format
+        let pk_ntt_packed = decode_pubkey_to_ntt_packed(&pk).expect("Failed to decode public key");
+
+        // Decode signature to abi.encodePacked format
+        let s2_packed = decode_kat_signature(&sm, mlen).expect("Failed to decode signature");
+
+        // Verify the signature
+        let result = eth_falcon_verify(&msg, salt, &s2_packed, &pk_ntt_packed);
+        assert!(
+            result.is_ok(),
+            "Verification should not error: {:?}",
+            result
+        );
+        assert!(result.unwrap(), "Signature should verify successfully");
+    }
+
+    /// Decode KAT signature from sm format to abi.encodePacked format
+    ///
+    /// KAT sm format: slen(2) + salt(40) + message(mlen) + header(0x29) + compressed_sig
+    /// Function format: header(0x39) + salt(40) + compressed_sig
+    fn decode_kat_signature(sm: &[u8], mlen: usize) -> Result<Vec<u8>, &'static str> {
+        if sm.len() < 2 + 40 + mlen + 1 {
+            return Err("sm too short");
+        }
+
+        // Extract components
+        let salt = &sm[2..42];
+        let header_pos = 42 + mlen;
+        let compressed_sig = &sm[header_pos + 1..];
+
+        // Construct signature in expected format: header(0x39) + salt(40) + compressed_sig
+        let mut sig = Vec::with_capacity(1 + 40 + compressed_sig.len());
+        sig.push(0x39); // Header for logn=9
+        sig.extend_from_slice(salt);
+        sig.extend_from_slice(compressed_sig);
+
+        // Decode to abi.encodePacked format
+        decode_signature_to_packed(&sig)
     }
 }

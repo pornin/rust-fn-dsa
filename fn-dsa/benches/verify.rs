@@ -3,7 +3,10 @@
 mod util;
 use util::{banner_arch, core_cycles, FakeRNG};
 
-use fn_dsa::{KeyPairGenerator, KeyPairGeneratorStandard, SigningKey, SigningKeyStandard, VerifyingKey, VerifyingKeyStandard, sign_key_size, vrfy_key_size, signature_size, DOMAIN_NONE, HASH_ID_RAW};
+use fn_dsa::{
+    sign_key_size, signature_size, vrfy_key_size, KeyPairGenerator, KeyPairGeneratorStandard,
+    SigningKey, SigningKeyStandard, VerifyingKey, VerifyingKeyStandard, DOMAIN_NONE, HASH_ID_RAW,
+};
 
 fn bench_verify(logn: u32) -> (f64, u8) {
     // Make a key pair.
@@ -23,8 +26,13 @@ fn bench_verify(logn: u32) -> (f64, u8) {
     let mut sk = SigningKeyStandard::decode(sk_e).unwrap();
     let mut msg = [0u8];
     for i in 0..sigs_buf.len() {
-        sk.sign(&mut rng, &DOMAIN_NONE, &HASH_ID_RAW, &msg,
-            &mut sigs_buf[i][..sig_len]);
+        sk.sign(
+            &mut rng,
+            &DOMAIN_NONE,
+            &HASH_ID_RAW,
+            &msg,
+            &mut sigs_buf[i][..sig_len],
+        );
     }
 
     let vk = VerifyingKeyStandard::decode(vk_e).unwrap();
@@ -32,8 +40,7 @@ fn bench_verify(logn: u32) -> (f64, u8) {
     for i in 0..tt.len() {
         let begin = core_cycles();
         for _ in 0..1000 {
-            let x = vk.verify(&sigs_buf[i][..sig_len],
-                &DOMAIN_NONE, &HASH_ID_RAW, &msg);
+            let x = vk.verify(&sigs_buf[i][..sig_len], &DOMAIN_NONE, &HASH_ID_RAW, &msg);
             msg[0] = msg[0].wrapping_mul(((x as u8) << 1) + 3);
         }
         let end = core_cycles();
@@ -61,8 +68,13 @@ fn bench_verify_full(logn: u32) -> (f64, u8) {
     let mut sk = SigningKeyStandard::decode(sk_e).unwrap();
     let mut msg = [0u8];
     for i in 0..sigs_buf.len() {
-        sk.sign(&mut rng,
-            &DOMAIN_NONE, &HASH_ID_RAW, &msg, &mut sigs_buf[i][..sig_len]);
+        sk.sign(
+            &mut rng,
+            &DOMAIN_NONE,
+            &HASH_ID_RAW,
+            &msg,
+            &mut sigs_buf[i][..sig_len],
+        );
     }
 
     let mut tt = [0; 10];
@@ -70,8 +82,7 @@ fn bench_verify_full(logn: u32) -> (f64, u8) {
         let begin = core_cycles();
         for _ in 0..1000 {
             let vk = VerifyingKeyStandard::decode(vk_e).unwrap();
-            let x = vk.verify(&sigs_buf[i][..sig_len],
-                &DOMAIN_NONE, &HASH_ID_RAW, &msg);
+            let x = vk.verify(&sigs_buf[i][..sig_len], &DOMAIN_NONE, &HASH_ID_RAW, &msg);
             msg[0] = msg[0].wrapping_mul(((x as u8) << 1) + 3);
         }
         let end = core_cycles();
@@ -90,12 +101,18 @@ fn main() {
     bx ^= x;
     let (w, x) = bench_verify(9);
     bx ^= x;
-    println!("FN-DSA verify (n = 512)        {:13.2}     add.: {:13.2}", v, w);
+    println!(
+        "FN-DSA verify (n = 512)        {:13.2}     add.: {:13.2}",
+        v, w
+    );
     let (v, x) = bench_verify_full(10);
     bx ^= x;
     let (w, x) = bench_verify(10);
     bx ^= x;
-    println!("FN-DSA verify (n = 1024)       {:13.2}     add.: {:13.2}", v, w);
+    println!(
+        "FN-DSA verify (n = 1024)       {:13.2}     add.: {:13.2}",
+        v, w
+    );
 
     println!("{}", bx);
 }

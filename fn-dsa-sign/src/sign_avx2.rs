@@ -13,11 +13,18 @@ mod sampler_avx2;
 // This is a specialized version of decode_inner() (defined in the
 // parent module); it leverages AVX2 intrinsics to speed up operations.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
-    f: &mut [i8], g: &mut [i8], F: &mut [i8], G: &mut [i8],
-    vrfy_key: &mut [u8], hashed_vrfy_key: &mut [u8],
-    tmp_u16: &mut [u16], src: &[u8]) -> Option<u32>
-{
+pub(crate) unsafe fn decode_avx2_inner(
+    logn_min: u32,
+    logn_max: u32,
+    f: &mut [i8],
+    g: &mut [i8],
+    F: &mut [i8],
+    G: &mut [i8],
+    vrfy_key: &mut [u8],
+    hashed_vrfy_key: &mut [u8],
+    tmp_u16: &mut [u16],
+    src: &[u8],
+) -> Option<u32> {
     if src.len() < 1 {
         return None;
     }
@@ -110,9 +117,14 @@ pub(crate) unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
 // This is a specialized version of compute_basis_inner() (defined in the
 // parent module); it leverages AVX2 intrinsics to speed up operations.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn compute_basis_avx2_inner(logn: u32,
-    f: &[i8], g: &[i8], F: &[i8], G: &[i8], basis: &mut [flr::FLR])
-{
+pub(crate) unsafe fn compute_basis_avx2_inner(
+    logn: u32,
+    f: &[i8],
+    g: &[i8],
+    F: &[i8],
+    G: &[i8],
+    basis: &mut [flr::FLR],
+) {
     let n = 1usize << logn;
 
     // Lattice basis is B = [[g, -f], [G, -F]].
@@ -137,13 +149,22 @@ pub(crate) unsafe fn compute_basis_avx2_inner(logn: u32,
 // module); it leverages AVX2 intrinsics to speed up operations.
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn sign_avx2_inner<T: CryptoRng + RngCore, P: PRNG>(
-    logn: u32, rng: &mut T,
-    f: &[i8], g: &[i8], F: &[i8], G: &[i8], hashed_vrfy_key: &[u8],
-    ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8],
-    #[cfg(not(feature = "small_context"))]
-    basis: &[flr::FLR],
-    tmp_i16: &mut [i16], tmp_u16: &mut [u16], tmp_flr: &mut [flr::FLR])
-{
+    logn: u32,
+    rng: &mut T,
+    f: &[i8],
+    g: &[i8],
+    F: &[i8],
+    G: &[i8],
+    hashed_vrfy_key: &[u8],
+    ctx: &DomainContext,
+    id: &HashIdentifier,
+    hv: &[u8],
+    sig: &mut [u8],
+    #[cfg(not(feature = "small_context"))] basis: &[flr::FLR],
+    tmp_i16: &mut [i16],
+    tmp_u16: &mut [u16],
+    tmp_flr: &mut [flr::FLR],
+) {
     let n = 1usize << logn;
     assert!(f.len() == n);
     assert!(g.len() == n);

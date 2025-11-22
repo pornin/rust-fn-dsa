@@ -20,3 +20,4 @@ hex.workspace = true
 [features]
 default = []
 no_avx2 = []
+eth_falcon = ["fn-dsa-comm/eth_falcon"]

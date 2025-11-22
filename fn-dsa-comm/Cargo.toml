@@ -13,6 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 rand_core.workspace = true
+tiny-keccak = { workspace = true, optional = true }
 
 [target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
 cpufeatures.workspace = true
@@ -24,3 +25,4 @@ hex.workspace = true
 default = []
 no_avx2 = []
 shake256x4 = []
+eth_falcon = ["tiny-keccak"]

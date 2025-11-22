@@ -32,11 +32,11 @@ pub fn trim_i8_encode(f: &[i8], nbits: u32, d: &mut [u8]) -> usize {
 /// from `d` in order to fill the slice `f` entirely. The actual number
 /// of bytes read from `d` is returned. `None` is returned if any of the
 /// following happens:
-/// 
+///
 ///  - Source buffer is not large enough.
 ///  - An invalid encoding (`-2^(nbits-1)`) is encountered.
 ///  - Some bits are unused in the last byte and are not all zero.
-/// 
+///
 /// The number of bits per coefficient (nbits) MUST lie between 2 and 8
 /// (inclusive).
 pub fn trim_i8_decode(d: &[u8], f: &mut [i8], nbits: u32) -> Option<usize> {
@@ -134,8 +134,7 @@ pub fn modq_decode(d: &[u8], h: &mut [u16]) -> Option<usize> {
     h[2] = h2 as u16;
     h[3] = h3 as u16;
     for i in 1..(n >> 2) {
-        let x = u64::from_be_bytes(
-            *<&[u8; 8]>::try_from(&d[(7 * i - 1)..(7 * i + 7)]).unwrap());
+        let x = u64::from_be_bytes(*<&[u8; 8]>::try_from(&d[(7 * i - 1)..(7 * i + 7)]).unwrap());
         let h0 = ((x >> 42) as u32) & 0x3FFF;
         let h1 = ((x >> 28) as u32) & 0x3FFF;
         let h2 = ((x >> 14) as u32) & 0x3FFF;

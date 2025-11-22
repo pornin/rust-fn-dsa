@@ -52,7 +52,7 @@
 //!     sign_key_size, vrfy_key_size, FN_DSA_LOGN_512,
 //!     KeyPairGenerator, KeyPairGeneratorStandard,
 //! };
-//! 
+//!
 //! let mut kg = KeyPairGeneratorStandard::default();
 //! let mut sign_key = [0u8; sign_key_size(FN_DSA_LOGN_512)];
 //! let mut vrfy_key = [0u8; vrfy_key_size(FN_DSA_LOGN_512)];
@@ -69,32 +69,38 @@ mod poly;
 mod vect;
 mod zint31;
 
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 mod ntru_avx2;
 
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 mod poly_avx2;
 
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 mod vect_avx2;
 
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 mod zint31_avx2;
 
-use fn_dsa_comm::{codec, mq, shake};
 #[cfg(not(feature = "shake256x4"))]
 use fn_dsa_comm::PRNG;
+use fn_dsa_comm::{codec, mq, shake};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // Re-export useful types, constants and functions.
 pub use fn_dsa_comm::{
-    sign_key_size, vrfy_key_size,
-    FN_DSA_LOGN_512, FN_DSA_LOGN_1024,
-    CryptoRng, RngCore, RngError,
+    sign_key_size, vrfy_key_size, CryptoRng, RngCore, RngError, FN_DSA_LOGN_1024, FN_DSA_LOGN_512,
 };
 
 /// Key pair generator and temporary buffers.
@@ -107,7 +113,6 @@ pub use fn_dsa_comm::{
 /// automatic zeroization (overwrite of all contained secret values when
 /// the object is released).
 pub trait KeyPairGenerator: Default {
-
     /// Generate a new key pair.
     ///
     /// The random source `rng` MUST be cryptographically secure. The
@@ -117,9 +122,14 @@ pub trait KeyPairGenerator: Default {
     /// destination slices MUST have the exact size for their respective
     /// contents (see the `sign_key_size()` and `vrfy_key_size()`
     /// functions).
-    fn keygen<T: CryptoRng + RngCore>(&mut self,
-        logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8]);
-	
+    fn keygen<T: CryptoRng + RngCore>(
+        &mut self,
+        logn: u32,
+        rng: &mut T,
+        sign_key: &mut [u8],
+        vrfy_key: &mut [u8],
+    );
+
     /// Generate a new key pair from a given seed.
     ///
     /// The seed must have strong entropy and should be at least 32 bytes. The
@@ -141,7 +151,7 @@ pub trait KeyPairGenerator: Default {
 macro_rules! kgen_impl {
     ($typename:ident, $logn_min:expr, $logn_max:expr) => {
         #[doc = concat!("Key pair generator for degrees (`logn`) ",
-                stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
+                        stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
         #[derive(Zeroize, ZeroizeOnDrop)]
         pub struct $typename {
             tmp_i8: [i8; 4 * (1 << ($logn_max))],
@@ -150,13 +160,16 @@ macro_rules! kgen_impl {
             tmp_fxr: [fxp::FXR; 5 * (1 << (($logn_max) - 1))],
         }
 
-    impl KeyPairGenerator for $typename {
-
-        fn keygen<T: CryptoRng + RngCore>(&mut self,
-            logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8])
-        {
-            // Enforce minimum and maximum degree.
-            assert!(logn >= ($logn_min) && logn <= ($logn_max));
+        impl KeyPairGenerator for $typename {
+            fn keygen<T: CryptoRng + RngCore>(
+                &mut self,
+                logn: u32,
+                rng: &mut T,
+                sign_key: &mut [u8],
+                vrfy_key: &mut [u8],
+            ) {
+                // Enforce minimum and maximum degree.
+                assert!(logn >= ($logn_min) && logn <= ($logn_max));
 
                 // Get a new seed. Everything is generated deterministically from
                 // the seed.
@@ -379,17 +392,26 @@ fn keygen_from_seed(
 }
 
 // keygen_from_seed() variant, with AVX2 optimizations.
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 #[target_feature(enable = "avx2")]
-unsafe fn keygen_from_seed_avx2(logn: u32, seed: &[u8],
-    f: &mut [i8], g: &mut [i8], F: &mut [i8], G: &mut [i8],
-    tmp_u16: &mut [u16], tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])
-{
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::*;
+unsafe fn keygen_from_seed_avx2(
+    logn: u32,
+    seed: &[u8],
+    f: &mut [i8],
+    g: &mut [i8],
+    F: &mut [i8],
+    G: &mut [i8],
+    tmp_u16: &mut [u16],
+    tmp_u32: &mut [u32],
+    tmp_fxr: &mut [fxp::FXR],
+) {
     #[cfg(target_arch = "x86")]
     use core::arch::x86::*;
+    #[cfg(target_arch = "x86_64")]
+    use core::arch::x86_64::*;
 
     use core::mem::transmute;
     use fn_dsa_comm::mq_avx2;
@@ -401,7 +423,6 @@ unsafe fn keygen_from_seed_avx2(logn: u32, seed: &[u8],
     assert!(g.len() == n);
     assert!(F.len() == n);
     assert!(G.len() == n);
-
 
     #[cfg(feature = "shake256x4")]
     let mut rng = shake::SHAKE256x4::new(seed);
@@ -440,13 +461,13 @@ unsafe fn keygen_from_seed_avx2(logn: u32, seed: &[u8],
             }
             ys = _mm256_add_epi16(ys, _mm256_srli_epi32(ys, 16));
             ov = _mm256_or_si256(ov, ys);
-            ys = _mm256_and_si256(ys, _mm256_setr_epi16(
-                -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0));
+            ys = _mm256_and_si256(
+                ys,
+                _mm256_setr_epi16(-1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0),
+            );
             ys = _mm256_add_epi32(ys, _mm256_srli_epi64(ys, 32));
             ys = _mm256_add_epi32(ys, _mm256_bsrli_epi128(ys, 8));
-            let xs = _mm_add_epi32(
-                _mm256_castsi256_si128(ys),
-                _mm256_extracti128_si256(ys, 1));
+            let xs = _mm_add_epi32(_mm256_castsi256_si128(ys), _mm256_extracti128_si256(ys, 1));
             let r = _mm256_movemask_epi8(ov) as u32;
             if (r & 0xAAAAAAAA) != 0 {
                 continue;
@@ -489,7 +510,7 @@ unsafe fn keygen_from_seed_avx2(logn: u32, seed: &[u8],
 mod tests {
 
     use super::*;
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     // For degrees 256, 512, and 1024, 100 key pairs have been generated
     // with falcon.py from ntrugen; this implementation is supposed to be
@@ -1147,19 +1168,26 @@ mod tests {
         for i in 0..rh.len() {
             let mut seed = [0u8; 10];
             seed[..4].copy_from_slice(&b"test"[..]);
-            let seed_len =
-                if i < 10 {
-                    seed[4] = (0x30 + i) as u8;
-                    5
-                } else {
-                    seed[4] = (0x30 + (i / 10)) as u8;
-                    seed[5] = (0x30 + (i % 10)) as u8;
-                    6
-                };
+            let seed_len = if i < 10 {
+                seed[4] = (0x30 + i) as u8;
+                5
+            } else {
+                seed[4] = (0x30 + (i / 10)) as u8;
+                seed[5] = (0x30 + (i % 10)) as u8;
+                6
+            };
             let seed = &seed[..seed_len];
-            keygen_from_seed(logn, seed,
-                &mut f[..n], &mut g[..n], &mut F[..n], &mut G[..n],
-                &mut t16, &mut t32, &mut tfx);
+            keygen_from_seed(
+                logn,
+                seed,
+                &mut f[..n],
+                &mut g[..n],
+                &mut F[..n],
+                &mut G[..n],
+                &mut t16,
+                &mut t32,
+                &mut tfx,
+            );
             for j in 0..n {
                 th[j] = f[j] as u8;
                 th[j + n] = g[j] as u8;
@@ -1171,13 +1199,23 @@ mod tests {
             let hv = sh.finalize();
             assert!(hv[..] == hex::decode(rh[i]).unwrap());
 
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
+            #[cfg(all(
+                not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")
+            ))]
             if fn_dsa_comm::has_avx2() {
                 unsafe {
-                    keygen_from_seed_avx2(logn, seed,
-                        &mut f[..n], &mut g[..n], &mut F[..n], &mut G[..n],
-                        &mut t16, &mut t32, &mut tfx);
+                    keygen_from_seed_avx2(
+                        logn,
+                        seed,
+                        &mut f[..n],
+                        &mut g[..n],
+                        &mut F[..n],
+                        &mut G[..n],
+                        &mut t16,
+                        &mut t32,
+                        &mut tfx,
+                    );
                 }
                 for j in 0..n {
                     assert!(th[j] == (f[j] as u8));
@@ -1210,9 +1248,17 @@ mod tests {
             let mut tfx = [fxp::FXR::ZERO; 5 * 512];
             for t in 0..2 {
                 let seed = [logn as u8, t];
-                keygen_from_seed(logn, &seed,
-                    &mut f[..n], &mut g[..n], &mut F[..n], &mut G[..n],
-                    &mut t16, &mut t32, &mut tfx);
+                keygen_from_seed(
+                    logn,
+                    &seed,
+                    &mut f[..n],
+                    &mut g[..n],
+                    &mut F[..n],
+                    &mut G[..n],
+                    &mut t16,
+                    &mut t32,
+                    &mut tfx,
+                );
                 for i in 0..(2 * n) {
                     r[i] = 0;
                 }
@@ -1233,18 +1279,27 @@ mod tests {
                     assert!(r[i] == 0);
                 }
 
-                #[cfg(all(not(feature = "no_avx2"),
-                    any(target_arch = "x86_64", target_arch = "x86")))]
+                #[cfg(all(
+                    not(feature = "no_avx2"),
+                    any(target_arch = "x86_64", target_arch = "x86")
+                ))]
                 if fn_dsa_comm::has_avx2() {
                     let mut f2 = [0i8; 1024];
                     let mut g2 = [0i8; 1024];
                     let mut F2 = [0i8; 1024];
                     let mut G2 = [0i8; 1024];
                     unsafe {
-                        keygen_from_seed_avx2(logn, &seed,
-                            &mut f2[..n], &mut g2[..n],
-                            &mut F2[..n], &mut G2[..n],
-                            &mut t16, &mut t32, &mut tfx);
+                        keygen_from_seed_avx2(
+                            logn,
+                            &seed,
+                            &mut f2[..n],
+                            &mut g2[..n],
+                            &mut F2[..n],
+                            &mut G2[..n],
+                            &mut t16,
+                            &mut t32,
+                            &mut tfx,
+                        );
                     }
                     assert!(f[..n] == f2[..n]);
                     assert!(g[..n] == g2[..n]);

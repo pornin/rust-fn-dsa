@@ -13,6 +13,8 @@ rust-version.workspace = true
 
 [dependencies]
 fn-dsa-comm = { version = "0.3", path = "../fn-dsa-comm" }
+rand_core = { workspace = true, optional = true, features = ["getrandom"] }
+rand_chacha = { workspace = true, optional = true }
 zeroize.workspace = true
 
 [dev-dependencies]
@@ -25,3 +27,4 @@ no_avx2 = []
 div_emu = []
 sqrt_emu = []
 shake256x4 = []
+eth_falcon = ["fn-dsa-comm/eth_falcon", "rand_chacha", "rand_core"]

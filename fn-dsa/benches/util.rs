@@ -1,5 +1,5 @@
 use fn_dsa::{CryptoRng, RngCore, RngError};
-use fn_dsa_comm::shake::{SHAKE256};
+use fn_dsa_comm::shake::SHAKE256;
 
 #[cfg(target_arch = "x86")]
 pub fn core_cycles() -> u64 {
@@ -67,9 +67,7 @@ impl RngCore for FakeRNG {
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         self.0.extract(dest);
     }
-    fn try_fill_bytes(&mut self, dest: &mut [u8])
-        -> Result<(), RngError>
-    {
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
         self.0.extract(dest);
         Ok(())
     }
@@ -82,8 +80,10 @@ pub fn banner_arch() {
         #[cfg(feature = "no_avx2")]
         print!(", AVX2:code=no");
         #[cfg(not(feature = "no_avx2"))]
-        print!(", AVX2:code=yes,cpu={}",
-            if fn_dsa_comm::has_avx2() { "yes" } else { "no" });
+        print!(
+            ", AVX2:code=yes,cpu={}",
+            if fn_dsa_comm::has_avx2() { "yes" } else { "no" }
+        );
         println!();
     }
 
@@ -93,8 +93,10 @@ pub fn banner_arch() {
         #[cfg(feature = "no_avx2")]
         print!(", AVX2:code=no");
         #[cfg(not(feature = "no_avx2"))]
-        print!(", AVX2:code=yes,cpu={}",
-            if fn_dsa_comm::has_avx2() { "yes" } else { "no" });
+        print!(
+            ", AVX2:code=yes,cpu={}",
+            if fn_dsa_comm::has_avx2() { "yes" } else { "no" }
+        );
         println!();
     }
 
@@ -112,6 +114,7 @@ pub fn banner_arch() {
         target_arch = "x86",
         target_arch = "aarch64",
         target_arch = "arm64ec",
-        target_arch = "riscv64")))]
+        target_arch = "riscv64"
+    )))]
     println!("Arch: unknown");
 }

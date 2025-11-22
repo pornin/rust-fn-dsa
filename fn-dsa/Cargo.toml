@@ -19,11 +19,14 @@ fn-dsa-vrfy = { version = "0.3", path = "../fn-dsa-vrfy" }
 
 [dev-dependencies]
 hex.workspace = true
+rand_chacha.workspace = true
+rand_core.workspace = true
 
 [features]
 default = []
 no_avx2 = []
 shake256x4 = [ "fn-dsa-comm/shake256x4", "fn-dsa-kgen/shake256x4", "fn-dsa-sign/shake256x4" ]
+eth_falcon = ["fn-dsa-comm/eth_falcon", "fn-dsa-sign/eth_falcon", "fn-dsa-vrfy/eth_falcon"]
 
 [[bench]]
 name = "keygen"

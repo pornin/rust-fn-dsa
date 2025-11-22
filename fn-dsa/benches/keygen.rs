@@ -3,7 +3,7 @@
 mod util;
 use util::{banner_arch, core_cycles, FakeRNG};
 
-use fn_dsa::{KeyPairGenerator, KeyPairGeneratorStandard, sign_key_size, vrfy_key_size};
+use fn_dsa::{sign_key_size, vrfy_key_size, KeyPairGenerator, KeyPairGeneratorStandard};
 
 fn bench_keygen(logn: u32) -> (f64, u8) {
     let z = core_cycles();

@@ -13,26 +13,21 @@ use fn_dsa_comm::PRNG;
 // to produce random 16-bit samples which are then used in a CDT table.
 
 const GTAB_8: [u16; 48] = [
-        1,     3,     6,    11,    22,    40,    73,   129,
-      222,   371,   602,   950,  1460,  2183,  3179,  4509,
-     6231,  8395, 11032, 14150, 17726, 21703, 25995, 30487,
-    35048, 39540, 43832, 47809, 51385, 54503, 57140, 59304,
-    61026, 62356, 63352, 64075, 64585, 64933, 65164, 65313,
-    65406, 65462, 65495, 65513, 65524, 65529, 65532, 65534,
+    1, 3, 6, 11, 22, 40, 73, 129, 222, 371, 602, 950, 1460, 2183, 3179, 4509, 6231, 8395, 11032,
+    14150, 17726, 21703, 25995, 30487, 35048, 39540, 43832, 47809, 51385, 54503, 57140, 59304,
+    61026, 62356, 63352, 64075, 64585, 64933, 65164, 65313, 65406, 65462, 65495, 65513, 65524,
+    65529, 65532, 65534,
 ];
 
 const GTAB_9: [u16; 34] = [
-        1,     4,    11,    28,    65,   146,   308,   615,
-     1164,  2083,  3535,  5692,  8706, 12669, 17574, 23285,
-    29542, 35993, 42250, 47961, 52866, 56829, 59843, 62000,
-    63452, 64371, 64920, 65227, 65389, 65470, 65507, 65524,
-    65531, 65534,
+    1, 4, 11, 28, 65, 146, 308, 615, 1164, 2083, 3535, 5692, 8706, 12669, 17574, 23285, 29542,
+    35993, 42250, 47961, 52866, 56829, 59843, 62000, 63452, 64371, 64920, 65227, 65389, 65470,
+    65507, 65524, 65531, 65534,
 ];
 
 const GTAB_10: [u16; 24] = [
-        2,     8,    28,    94,   280,   742,  1761,  3753,
-     7197, 12472, 19623, 28206, 37329, 45912, 53063, 58338,
-    61782, 63774, 64793, 65255, 65441, 65507, 65527, 65533
+    2, 8, 28, 94, 280, 742, 1761, 3753, 7197, 12472, 19623, 28206, 37329, 45912, 53063, 58338,
+    61782, 63774, 64793, 65255, 65441, 65507, 65527, 65533,
 ];
 
 // Sample the f (or g) polynomial, using the provided PRNG,
@@ -111,10 +106,13 @@ mod tests {
     fn sample_tv() {
         #[cfg(feature = "shake256x4")]
         {
-            check_sample_f(2,  "d916f113");
-            check_sample_f(3,  "01032314a907ea3a");
-            check_sample_f(4,  "1eecf605d71bfb010ae0d8fcf41ef9ef");
-            check_sample_f(5,  "0dfb011602f1141c0cf0ec0af1f5f2e1f10202020f0213f301ecdc0cf9211811");
+            check_sample_f(2, "d916f113");
+            check_sample_f(3, "01032314a907ea3a");
+            check_sample_f(4, "1eecf605d71bfb010ae0d8fcf41ef9ef");
+            check_sample_f(
+                5,
+                "0dfb011602f1141c0cf0ec0af1f5f2e1f10202020f0213f301ecdc0cf9211811",
+            );
             check_sample_f(6,  "1300030510fe100406f2ee0a05fc000af909f80a030309110f080b09000800faf5fe03ff04f901050a130efd0a1b0112fa030cfafa000afbfcfa0703fc021f01");
             check_sample_f(7,  "02eff5f908ffffff0c0507f2faf20bf50a05ff09fafff4f6f0f7fb0dfef80509fd05fcf7fffbfe0509f8f9020a05fdfd0103f4fa11080404f900f400080a02fb0308f6010ffefc0a08f9fd09e9030bf8fdfcf2f9fd02fb01fe0304f5f3fa0c04fbf9070006f609050cf5fbf806f9fa09faf90008f9f3f20f030cef0e04faf80a");
             check_sample_f(8,  "01fff9fb05fd0d18f9010806fff50cfe050802fc070005fff9f402fbfc0204fcf9020100fd02f50004f50803fff50308030c01f902fd01f7fffcfefbfffa0903ff02010301f808fcf707fb0007fa080504f6070afefcf7fe02fc080afeff0406fc05fcfcfff60501ff09f3f800030303f40bfd04f3fe04fdf50400f6f9050202f901f80000fafdfa0b00fc040df90103f8fb0108f8fffb040206f50205fd020d09fff80807fb03020cf90606fbff02fcfbf405fff8fffb07fa0002f80af8ff05f801fcfe03060603000c08020105050502fc05f90afc05fa0106090cf8fffafc02fcff0103f4f90009030202fdff08fa09fffd07f80709fefc0602fa0509fdfd");
@@ -124,10 +122,13 @@ mod tests {
 
         #[cfg(not(feature = "shake256x4"))]
         {
-            check_sample_f(2,  "e70c150d");
-            check_sample_f(3,  "d11108c2093007f9");
-            check_sample_f(4,  "071f280109f0f9fca611f6080020f8ef");
-            check_sample_f(5,  "19fa150a1008f5011110010d04ec0df50b090c18fd0cfce904f2ea10101120fd");
+            check_sample_f(2, "e70c150d");
+            check_sample_f(3, "d11108c2093007f9");
+            check_sample_f(4, "071f280109f0f9fca611f6080020f8ef");
+            check_sample_f(
+                5,
+                "19fa150a1008f5011110010d04ec0df50b090c18fd0cfce904f2ea10101120fd",
+            );
             check_sample_f(6,  "f8ecf40606fdee0903040a0208ff0b150f04ed040601f808f4f4ecf5f6f8fdedfc06fef9f8f4f1ebf6fdf7f515fb06fffcf808ef03090a0803fb010201011210");
             check_sample_f(7,  "03fdfaff010303f8fa030f0008f80a060300f615f6080cf5fbff030dfcf9f9010305f7e60700fdf3faf8eef6f91403f5fafcfefe040311f110030a0408faf7fa0e0201fc03f9010cfd06f6f504f3f4fffef802f60415fdfc06fa06f800fc040900fd02f6fff90efbf700f1070209fcfc00040204ff04fc0108f70afdfc05f502");
             check_sample_f(8,  "f9ff0606fffefffdfc07080806f9000a040a040200fbf7000202fb0406010f030206fc0100fa05f8fcfefc02080601fa04fb00fff2f80802fffc000302fc03fe03f2fdfd02010003fcf908f1f9ef0602fe030afb00fe040904040c0207fa0606060004f5040c05fbfafe0407f8fa050402f9f9f901fefd02fbebfcfeffff00fb0005030b07fbfdfbfcfc06fff9fe000301fffe0201060100fdfcf305fa0001fb00fc040d030203f3fd03fafb000806ff010006f90afd0bfb0705070dfb07ff01fd0408fc0103fc0109fff2f805fb01fafe0805fff80407fd0aff04fa01070700f00b0008f3ff07fc08faf101fc0404fe01fd04080af80b0a0804fffb090102fe");

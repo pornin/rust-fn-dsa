@@ -47,7 +47,7 @@
 //!     VerifyingKey, VerifyingKeyStandard,
 //!     DOMAIN_NONE, HASH_ID_RAW
 //! };
-//! 
+//!
 //! match VerifyingKeyStandard::decode(encoded_verifying_key) {
 //!     Some(vk) => {
 //!         if vk.verify(sig, &DOMAIN_NONE, &HASH_ID_RAW, b"message") {
@@ -62,31 +62,18 @@
 //! }
 //! ```
 
-use fn_dsa_comm::{codec, mq, hash_to_point, shake};
+use fn_dsa_comm::{codec, hash_to_point, mq, shake};
 
 // Re-export useful types, constants and functions.
 pub use fn_dsa_comm::{
-    vrfy_key_size, signature_size,
-    FN_DSA_LOGN_512, FN_DSA_LOGN_1024,
-    HashIdentifier,
-    HASH_ID_RAW,
-    HASH_ID_ORIGINAL_FALCON,
-    HASH_ID_SHA256,
-    HASH_ID_SHA384,
-    HASH_ID_SHA512,
-    HASH_ID_SHA512_256,
-    HASH_ID_SHA3_256,
-    HASH_ID_SHA3_384,
-    HASH_ID_SHA3_512,
-    HASH_ID_SHAKE128,
-    HASH_ID_SHAKE256,
-    DomainContext,
-    DOMAIN_NONE,
+    signature_size, vrfy_key_size, DomainContext, HashIdentifier, DOMAIN_NONE, FN_DSA_LOGN_1024,
+    FN_DSA_LOGN_512, HASH_ID_ORIGINAL_FALCON, HASH_ID_RAW, HASH_ID_SHA256, HASH_ID_SHA384,
+    HASH_ID_SHA3_256, HASH_ID_SHA3_384, HASH_ID_SHA3_512, HASH_ID_SHA512, HASH_ID_SHA512_256,
+    HASH_ID_SHAKE128, HASH_ID_SHAKE256,
 };
 
 /// Verifying key handler.
 pub trait VerifyingKey: Sized {
-
     /// Create the instance by decoding the verifying key from its storage
     /// format.
     ///
@@ -109,83 +96,113 @@ pub trait VerifyingKey: Sized {
     /// Return value is `true` if the signature is valid, `false` otherwise.
     /// Signature decoding errors and degree mismatch with the verifying key
     /// also lead to `false` being returned.
-    fn verify(&self, sig: &[u8],
-        ctx: &DomainContext, id: &HashIdentifier, hv: &[u8]) -> bool;
+    fn verify(&self, sig: &[u8], ctx: &DomainContext, id: &HashIdentifier, hv: &[u8]) -> bool;
 }
 
 macro_rules! vrfy_key_impl {
-    ($typename:ident, $logn_min:expr, $logn_max:expr) =>
-{
-    #[doc = concat!("Signature verifier for degrees (`logn`) ",
-        stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
-    #[derive(Copy, Clone, Debug)]
-    pub struct $typename {
-        logn: u32,
-        h: [u16; 1 << ($logn_max)],
-        hashed_key: [u8; 64],
+    ($typename:ident, $logn_min:expr, $logn_max:expr) => {
+        #[doc = concat!("Signature verifier for degrees (`logn`) ",
+                stringify!($logn_min), " to ", stringify!($logn_max), " only.")]
+        #[derive(Copy, Clone, Debug)]
+        pub struct $typename {
+            logn: u32,
+            h: [u16; 1 << ($logn_max)],
+            hashed_key: [u8; 64],
 
-        #[cfg(all(not(feature = "no_avx2"),
-            any(target_arch = "x86_64", target_arch = "x86")))]
-        use_avx2: bool,
-    }
+            #[cfg(all(
+                not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")
+            ))]
+            use_avx2: bool,
+        }
 
-    impl VerifyingKey for $typename {
+        impl VerifyingKey for $typename {
+            fn decode(src: &[u8]) -> Option<Self> {
+                let mut h = [0u16; 1 << ($logn_max)];
+                let mut hashed_key = [0u8; 64];
+                let mut sh = shake::SHAKE256::new();
+                sh.inject(src);
+                sh.flip();
+                sh.extract(&mut hashed_key);
 
-        fn decode(src: &[u8]) -> Option<Self> {
-            let mut h = [0u16; 1 << ($logn_max)];
-            let mut hashed_key = [0u8; 64];
-            let mut sh = shake::SHAKE256::new();
-            sh.inject(src);
-            sh.flip();
-            sh.extract(&mut hashed_key);
-
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
-            {
-                if fn_dsa_comm::has_avx2() {
-                    unsafe {
-                        let logn = decode_avx2_inner(
-                            $logn_min, $logn_max, &mut h[..], src)?;
-                        return Some(
-                            Self { logn, h, hashed_key, use_avx2: true });
+                #[cfg(all(
+                    not(feature = "no_avx2"),
+                    any(target_arch = "x86_64", target_arch = "x86")
+                ))]
+                {
+                    if fn_dsa_comm::has_avx2() {
+                        unsafe {
+                            let logn = decode_avx2_inner($logn_min, $logn_max, &mut h[..], src)?;
+                            return Some(Self {
+                                logn,
+                                h,
+                                hashed_key,
+                                use_avx2: true,
+                            });
+                        }
                     }
                 }
+
+                let logn = decode_inner($logn_min, $logn_max, &mut h[..], src)?;
+                Some(Self {
+                    logn,
+                    h,
+                    hashed_key,
+                    #[cfg(all(
+                        not(feature = "no_avx2"),
+                        any(target_arch = "x86_64", target_arch = "x86")
+                    ))]
+                    use_avx2: false,
+                })
             }
 
-            let logn = decode_inner($logn_min, $logn_max, &mut h[..], src)?;
-            Some(Self {
-                logn, h, hashed_key,
-                #[cfg(all(not(feature = "no_avx2"),
-                    any(target_arch = "x86_64", target_arch = "x86")))]
-                use_avx2: false,
-            })
-        }
+            fn verify(
+                &self,
+                sig: &[u8],
+                ctx: &DomainContext,
+                id: &HashIdentifier,
+                hv: &[u8],
+            ) -> bool {
+                let logn = self.logn;
+                let n = 1usize << logn;
+                let mut tmp_i16 = [0i16; 1 << ($logn_max)];
+                let mut tmp_u16 = [0u16; 2 << ($logn_max)];
 
-        fn verify(&self, sig: &[u8],
-            ctx: &DomainContext, id: &HashIdentifier, hv: &[u8]) -> bool
-        {
-            let logn = self.logn;
-            let n = 1usize << logn;
-            let mut tmp_i16 = [0i16; 1 << ($logn_max)];
-            let mut tmp_u16 = [0u16; 2 << ($logn_max)];
-
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
-            if self.use_avx2 {
-                unsafe {
-                    return verify_avx2_inner(logn,
-                        &self.h[..n], &self.hashed_key, sig, ctx, id, hv,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]);
+                #[cfg(all(
+                    not(feature = "no_avx2"),
+                    any(target_arch = "x86_64", target_arch = "x86")
+                ))]
+                if self.use_avx2 {
+                    unsafe {
+                        return verify_avx2_inner(
+                            logn,
+                            &self.h[..n],
+                            &self.hashed_key,
+                            sig,
+                            ctx,
+                            id,
+                            hv,
+                            &mut tmp_i16[..n],
+                            &mut tmp_u16[..(2 * n)],
+                        );
+                    }
                 }
+
+                verify_inner(
+                    logn,
+                    &self.h[..n],
+                    &self.hashed_key,
+                    sig,
+                    ctx,
+                    id,
+                    hv,
+                    &mut tmp_i16[..n],
+                    &mut tmp_u16[..(2 * n)],
+                )
             }
-
-            verify_inner(logn,
-                &self.h[..n], &self.hashed_key, sig, ctx, id, hv,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)])
         }
-    }
-
-} }
+    };
+}
 
 // A VerifyingKey type that supports the standard degrees (512 and 1024).
 vrfy_key_impl!(VerifyingKeyStandard, 9, 10);
@@ -207,9 +224,7 @@ vrfy_key_impl!(VerifyingKeyWeak, 2, 8);
 //   h          destination buffer for key coefficients
 //   src        encoded key
 // Returns None on error, or Some(logn) on success.
-fn decode_inner(logn_min: u32, logn_max: u32, h: &mut [u16], src: &[u8])
-    -> Option<u32>
-{
+fn decode_inner(logn_min: u32, logn_max: u32, h: &mut [u16], src: &[u8]) -> Option<u32> {
     if src.len() == 0 {
         return None;
     }
@@ -231,10 +246,17 @@ fn decode_inner(logn_min: u32, logn_max: u32, h: &mut [u16], src: &[u8])
     Some(logn)
 }
 
-fn verify_inner(logn: u32, h: &[u16], hashed_key: &[u8],
-    sig: &[u8], ctx: &DomainContext, id: &HashIdentifier, hv: &[u8],
-    tmp_i16: &mut [i16], tmp_u16: &mut [u16]) -> bool
-{
+fn verify_inner(
+    logn: u32,
+    h: &[u16],
+    hashed_key: &[u8],
+    sig: &[u8],
+    ctx: &DomainContext,
+    id: &HashIdentifier,
+    hv: &[u8],
+    tmp_i16: &mut [i16],
+    tmp_u16: &mut [u16],
+) -> bool {
     // Get some temporary buffers of length n elements.
     // s2i is signed, t1 and t2 are unsigned.
     let n = 1usize << logn;
@@ -283,12 +305,17 @@ fn verify_inner(logn: u32, h: &[u16], hashed_key: &[u8],
 }
 
 // AVX2-optimized implementation of key decoding.
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 #[target_feature(enable = "avx2")]
-unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
-    h: &mut [u16], src: &[u8]) -> Option<u32>
-{
+unsafe fn decode_avx2_inner(
+    logn_min: u32,
+    logn_max: u32,
+    h: &mut [u16],
+    src: &[u8],
+) -> Option<u32> {
     use fn_dsa_comm::mq_avx2;
 
     if src.len() == 0 {
@@ -313,13 +340,22 @@ unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
 }
 
 // AVX2-optimized implementation of verification.
-#[cfg(all(not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
+#[cfg(all(
+    not(feature = "no_avx2"),
+    any(target_arch = "x86_64", target_arch = "x86")
+))]
 #[target_feature(enable = "avx2")]
-unsafe fn verify_avx2_inner(logn: u32, h: &[u16], hashed_key: &[u8],
-    sig: &[u8], ctx: &DomainContext, id: &HashIdentifier, hv: &[u8],
-    tmp_i16: &mut [i16], tmp_u16: &mut [u16]) -> bool
-{
+unsafe fn verify_avx2_inner(
+    logn: u32,
+    h: &[u16],
+    hashed_key: &[u8],
+    sig: &[u8],
+    ctx: &DomainContext,
+    id: &HashIdentifier,
+    hv: &[u8],
+    tmp_i16: &mut [i16],
+    tmp_u16: &mut [u16],
+) -> bool {
     use fn_dsa_comm::mq_avx2;
 
     // Get some temporary buffers of length n elements.
@@ -366,13 +402,228 @@ unsafe fn verify_avx2_inner(logn: u32, h: &[u16], hashed_key: &[u8],
 
     // Signature is valid if the total squared norm of (s1,s2) is small
     // enough. We must take care of not overflowing.
-    norm1 < norm2.wrapping_neg()
-        && (norm1 + norm2) <= mq_avx2::SQBETA[logn as usize]
+    norm1 < norm2.wrapping_neg() && (norm1 + norm2) <= mq_avx2::SQBETA[logn as usize]
+}
+
+#[cfg(feature = "eth_falcon")]
+/// Support for verifying ETHFALCON signatures
+pub mod eth_falcon {
+    extern crate alloc;
+
+    use super::*;
+    use alloc::{
+        vec,
+        vec::Vec,
+    };
+    use fn_dsa_comm::eth_falcon::hash_to_point_keccak;
+
+    /// Falcon-512 parameters
+    const N: usize = 512;
+    const LOGN: u32 = 9;
+
+    /// Verify an ETHFALCON signature
+    ///
+    /// This is the core Rust API that accepts raw byte slices.
+    /// All inputs are Solidity abi.encodePacked(uint256[32]) format (1024 bytes each).
+    ///
+    /// # Arguments
+    /// * `message` - The message bytes (any length)
+    /// * `salt` - 40-byte random salt from signature
+    /// * `s2_packed` - Signature s2 in abi.encodePacked format (1024 bytes)
+    /// * `pk_ntt_packed` - Public key h in NTT form, abi.encodePacked format (1024 bytes)
+    ///
+    /// # Returns
+    /// * `Ok(true)` if signature is valid
+    /// * `Ok(false)` if signature is invalid
+    /// * `Err` if inputs are malformed
+    pub fn verify(
+        message: &[u8],
+        salt: &[u8],
+        s2_packed: &[u8],
+        pk_ntt_packed: &[u8],
+    ) -> Result<bool, &'static str> {
+        // Validate inputs
+        if salt.len() != 40 {
+            return Err("Salt must be exactly 40 bytes");
+        }
+
+        // Parse abi.encodePacked inputs
+        let s2_coeffs = parse_abi_packed_i16(s2_packed)?;
+        let h_ntt_coeffs = parse_abi_packed_u16(pk_ntt_packed)?;
+
+        // Step 1: Hash message to point using Keccak XOF (replaces SHAKE256)
+        let mut hashed = hash_to_point_keccak(N, message, salt)?;
+
+        // Step 2: Compute squared norm of s2
+        let norm_s2 = mq::signed_poly_sqnorm(LOGN, &s2_coeffs);
+
+        // Step 3: Convert hashed to internal format
+        mq::mqpoly_ext_to_int(LOGN, &mut hashed);
+
+        // Step 4: Convert s2 to NTT format
+        let mut s2_ext = vec![0u16; N];
+        mq::mqpoly_signed_to_ext(LOGN, &s2_coeffs, &mut s2_ext);
+        mq::mqpoly_ext_to_int(LOGN, &mut s2_ext);
+        mq::mqpoly_int_to_NTT(LOGN, &mut s2_ext);
+
+        // Step 5: Multiply s2 * h in NTT domain (O(n) operation)
+        let mut s2h_ntt = s2_ext.clone();
+        mq::mqpoly_mul_ntt(LOGN, &mut s2h_ntt, &h_ntt_coeffs);
+
+        // Step 6: Convert back from NTT
+        mq::mqpoly_NTT_to_int(LOGN, &mut s2h_ntt);
+
+        // Step 7: Compute s1 = c - s2*h
+        mq::mqpoly_sub_int(LOGN, &mut hashed, &s2h_ntt);
+
+        // Step 8: Convert s1 to external format for norm computation
+        mq::mqpoly_int_to_ext(LOGN, &mut hashed);
+
+        // Step 9: Compute squared norm of s1
+        let norm_s1 = mq::mqpoly_sqnorm(LOGN, &hashed);
+
+        // Step 10: Check signature bound
+        // Valid if ||s1||^2 + ||s2||^2 <= SQBETA
+        // Must avoid overflow
+        let valid =
+            norm_s1 < norm_s2.wrapping_neg() && (norm_s1 + norm_s2) <= mq::SQBETA[LOGN as usize];
+
+        Ok(valid)
+    }
+
+    /// Parse Solidity abi.encodePacked(uint256[32]) format to u16 coefficients
+    ///
+    /// Solidity stores coefficients in uint256[32] where each uint256 contains 16 coefficients
+    /// packed LSB-first. abi.encodePacked outputs this as 1024 bytes (32 × 32 bytes, big-endian).
+    fn parse_abi_packed_u16(data: &[u8]) -> Result<Vec<u16>, &'static str> {
+        if data.len() != 1024 {
+            return Err("abi.encodePacked(uint256[32]) must be 1024 bytes");
+        }
+
+        let mut coeffs = Vec::with_capacity(512);
+
+        // Process 32 uint256 values (32 bytes each)
+        for chunk_idx in 0..32 {
+            let chunk = &data[chunk_idx * 32..(chunk_idx + 1) * 32];
+
+            // Extract 16 coefficients LSB-first from big-endian uint256
+            for coeff_idx in 0..16 {
+                let byte_offset = 30 - (coeff_idx * 2); // Rightmost bytes first
+                let coeff = u16::from_be_bytes([chunk[byte_offset], chunk[byte_offset + 1]]);
+                coeffs.push(coeff);
+            }
+        }
+
+        Ok(coeffs)
+    }
+
+    /// Parse Solidity abi.encodePacked(uint256[32]) format to signed i16 coefficients
+    ///
+    /// Values > Q/2 are normalized to negative (mod Q arithmetic)
+    fn parse_abi_packed_i16(data: &[u8]) -> Result<Vec<i16>, &'static str> {
+        const Q: u16 = 12289;
+        let u16_coeffs = parse_abi_packed_u16(data)?;
+
+        Ok(u16_coeffs
+            .iter()
+            .map(|&coeff_u16| {
+                if coeff_u16 > Q / 2 {
+                    (coeff_u16 as i32 - Q as i32) as i16
+                } else {
+                    coeff_u16 as i16
+                }
+            }).collect())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_verify_basic() {
+            // Basic validation tests
+            let message = b"test message";
+            let salt = [0u8; 40];
+            let s2_packed = [0u8; 1024]; // abi.encodePacked format
+            let pk_ntt_packed = [0u8; 1024]; // abi.encodePacked format
+
+            // This will fail validation (zero signature), but should not panic
+            let result = verify(message, &salt, &s2_packed, &pk_ntt_packed);
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn test_verify_wrong_salt_length() {
+            let message = b"test";
+            let salt = [0u8; 32]; // Wrong length
+            let s2_packed = [0u8; 1024];
+            let pk_ntt_packed = [0u8; 1024];
+
+            let result = verify(message, &salt, &s2_packed, &pk_ntt_packed);
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err(), "Salt must be exactly 40 bytes");
+        }
+
+        #[test]
+        fn test_verify_wrong_signature_length() {
+            let message = b"test";
+            let salt = [0u8; 40];
+            let s2_packed = [0u8; 512]; // Wrong length
+            let pk_ntt_packed = [0u8; 1024];
+
+            let result = verify(message, &salt, &s2_packed, &pk_ntt_packed);
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                "abi.encodePacked(uint256[32]) must be 1024 bytes"
+            );
+        }
+
+        #[test]
+        fn test_verification_renaud_from_solidity() {
+            // Test vector from ETHFALCON/script/DeployETHFalcon.s.sol
+            // Message: "My name is Renaud"
+            let message = b"My name is Renaud";
+
+            // Salt from Solidity test (40 bytes)
+            let salt = hex::decode(
+                "46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762fd75dc4ddd8c0f200",
+            )
+                .unwrap();
+
+            // Public key from Solidity: console.log("PK:", vm.toString(abi.encodePacked(tmp_pkc)));
+            // This is the ACTUAL abi.encodePacked(uint256[32]) output (1024 bytes)
+            let pk_ntt_packed = hex::decode("0c8507b004f018130c9725032d4318851c430c6d1a102d612c1b155310882a312bb72df524fb176e0d2227a3096120c9127f2f74065728b7007d10770c5d0dca204b16c717c92fe91e0425a6297d0e6c13d027dc022b04502b3e1c8c2d390287230815c6286a18212b1208ea15a91ae21b881c3b236007ec266717df2c4e14740c37019824d3206000b7243d07c0160515b02df60b7506e71f7e0eed296a013221d413ea0832216019d029d721d223591ca0077227cb2b7e0cd02ff1117e23ec29bb02bb18ea1afd1c54294f188504d9176a06a3280d2ab72d8b065f2c4c26531a2f1fd922f12ecb183913e0179201242e81101c0e1b1ec60a3f17ac0f6117a8129d288103b52ebb24d9246a24dd2f1006ca1a7d08170417123a1e441af32427288e01b2064d01510b8712462b851ebe143014a90f8314882b820cdb271611281620044813ee16f6189a0b7d01e31a6e11bd01952239168029cc11440c0b100701b92c8e0419121a00361cc40ece2398067e05a6292529fd27352aa9024a1a6320eb23b52ec205a409911e001385165e0f622c751e6924e80b2529461be712cb069f2e3a08d826b003a7016e14d007f2210a09bd29822fbb13492c8302d22b8324eb2f2f1e850ff30d8c0561086a0acf08192cb71e831a14106213f72fe22f781d0728090ea214c1166310f426fd053c104529f40486064928161a722d622e01130f09cf1e6c214c114901f5214a217b078e1a1825b20e5b024b19a41e0b0fae0b76247a0b7e0a171a7e274d1f7a09ec131d1d0d2a2f036817181d620117070d2264051721a92c732e8c1602122819f8077617361ab02a9c2e741a80288c20b02a9714d52ab6227811561b4e2cd01e5415af075714f02b5e117b06c10bb701061341095516e6172e2bab0a77196c0c782e9d122b015e02fc2cfa1f8616af2ef42e782235150004991abe11f718cb20d70ee51dbc258d2a5f0efd18731d6e2f5f009721a8203f0fe11056263510271cbf29d10cc6129225552edc0bc027f8050d1fbf0b2329941183136f16b52f5726782e96226d13751898259826fb2e1e094b1265274e057c23d425952559195c191005ef2eac1a211442070819ba26fb20d426d51119014911f70b5f28b425130a93045b1ae111521bea233514d103260efc1bdc0b7c152c19821034035024c31fb108ce236c0e3424b1017504220e651209276629271053051c262019cd09750b2f0de607780540045e209e133b28f6186e2e611b47038f093915e10b021d341a0e010821af1cc9191911c11a4b076b25a70c712f1229811b93034d285908281bfe00e10c65188f269a1df326c617f31a8f05c10ddf1ab100061bd10cca174b1af023402c46162a02ea27d9045e04390ac72c76044a2383199806b616e01bad0de70ab920da2b3e16961183270b14cf2ced").unwrap();
+
+            // Signature s2 from Solidity: console.log("sig:", vm.toString(abi.encodePacked(tmp_s2)));
+            // This is the ACTUAL abi.encodePacked(uint256[32]) output (1024 bytes)
+            let s2_packed = hex::decode("006b01372f0e00e101412f42005c2fef2f6a001200122ff72f3300582e6600aa00af00602f7e2ece008d008c2faf007a2fa8008000ac2f7400cf2f9a00fc001f000a001b2f792ee2000c0026000900462edc000e008e00012f732fd100a82f3e2faf001500672f58006100f72fab2fcc0100007d2fdd2fd3009b2ff02ff200282fd20023004100462e2e00f0008f00b700302fe500b7002d2fb62fdc006c2f432f932fed00b4002a2f852fec004400ef001300172fb700e500332feb2f5b000600322f4e2f902f2b2e6800912fa52fe30026005f2fe900b12f682fd8008a2fb92fbb018f00a32fd8005400af002d0036004700202e982f48006200c6003d00e0002c00fb0030005e000c01652ee400e0007b001800472fda00af2f4d0011006a006f00cf00c52f072fe62efc00410037008000952f82004b006e003d008300552f6900b02faf00302f66007700ba2f7b2f2a2fe7007d2fe02fbd2fd42f912f592fb12ff42f072fb900342f7b2fd62fd22f452f2700632f8b2f152f6401b00000004b2fb500552fe82f6b2fab2fab2ee90026002b2f67005b004801602fc30050008f00372f9a00c500762fc92f682ff92ff72f7f2f4d00532ff200e12f6f2f822fe42ff12e962f2b2eeb002f00ee01970056001a2f8400d000952fae2f732f5b00e72f8e2fa62fdc2e8101a72f8e002a2f1f00800059005c2fff003700d62fe92f7f00c600eb2fe700ca2fbc2fda2fa200162f4f2fd700112ffe2fb92fbd2f532f3c2f3c006600392fa300b6002d000f000a00852fd92fb4009a01392fd300d1004f002b2f1901a72f3e00bc00ce2ff92eb0018d002d00142f882fd6006200982ff92f9c0002008200980009002c2fa000b82fa22f3c2f8d2f1c2f550058004a2fb700f42fdb007c00a5009a0039002d2f7f2e2e2eda01372fd301282ff6007c003c00c700982f6e2f512f802fd60068001e00e72f602fd1005e2fe72fa1007c2f4e00d400212ec82fea2ffe2f2e006c002f2fc32ebe2fcd2fe700d72fc32f4501412fb40075001101792ebd2f3a00fc2fb800882f320115000400852f092f3400692f2e2ff02ff000ac2f822fdc003e2ff02f1d2ed62f5e2fb4004500dd2fad00c62f47012e2f4100c600552fc42ff42fab2ff0002a2f942fb12f242f40005500202fac00042f5400260083012a2fea2f1d2faf009f007600802fbc2fe32f5700402ffb2fc32f7700f8014200dd2fec002800102fe52fb800a800b42f880003015301202f522f33006a2f9c005d2f762f9a005e2f982fbb2feb012b2f822f8e2f962f702f9f2e990098300000452fab2f3700c80080009d00370014005f2fb02fbd2ff02f08003f2ee900f72ef9004a2f0c013c00b92f862f5100372f442f06007f01a100a92fd000292fa32fd602482f6f2fd42f8100ad2f7500722ff90006").unwrap();
+
+            // Validate lengths
+            assert_eq!(salt.len(), 40, "Salt should be 40 bytes");
+            assert_eq!(pk_ntt_packed.len(), 1024, "Public key should be 1024 bytes");
+            assert_eq!(s2_packed.len(), 1024, "Signature should be 1024 bytes");
+
+            // Call the verification function with raw byte slices
+            let result = verify(message, &salt, &s2_packed, &pk_ntt_packed);
+
+            match result {
+                Ok(valid) => {
+                    assert!(
+                        valid,
+                        "Verification should succeed for valid signature from Solidity test"
+                    );
+                }
+                Err(e) => {
+                    panic!("Verification failed with error: {}", e);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -392,15 +643,12 @@ mod tests {
             let mut e_sig = hex::decode(kat[3 * i + 2]).unwrap();
 
             let vk = VerifyingKeyStandard::decode(&e_pub).unwrap();
-            assert!(vk.verify(&e_sig,
-                &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
+            assert!(vk.verify(&e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
             e_msg[0] ^= 0x01;
-            assert!(!vk.verify(&e_sig,
-                &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
+            assert!(!vk.verify(&e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
             e_msg[0] ^= 0x01;
             e_sig[50] ^= 0x01;
-            assert!(!vk.verify(&e_sig,
-                &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
+            assert!(!vk.verify(&e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg));
             e_sig[50] ^= 0x01;
 
             // Also check the inner function(s).
@@ -408,35 +656,85 @@ mod tests {
             let n = 1usize << logn;
             let mut tmp_i16 = [0i16; 1 << 10];
             let mut tmp_u16 = [0u16; 2 << 10];
-            assert!(verify_inner(logn, &vk.h[..n], &vk.hashed_key,
-                &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+            assert!(verify_inner(
+                logn,
+                &vk.h[..n],
+                &vk.hashed_key,
+                &e_sig,
+                &DOMAIN_NONE,
+                &HASH_ID_ORIGINAL_FALCON,
+                &e_msg,
+                &mut tmp_i16[..n],
+                &mut tmp_u16[..(2 * n)]
+            ));
             e_msg[0] ^= 0x01;
-            assert!(!verify_inner(logn, &vk.h[..n], &vk.hashed_key,
-                &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+            assert!(!verify_inner(
+                logn,
+                &vk.h[..n],
+                &vk.hashed_key,
+                &e_sig,
+                &DOMAIN_NONE,
+                &HASH_ID_ORIGINAL_FALCON,
+                &e_msg,
+                &mut tmp_i16[..n],
+                &mut tmp_u16[..(2 * n)]
+            ));
             e_msg[0] ^= 0x01;
             e_sig[50] ^= 0x01;
-            assert!(!verify_inner(logn, &vk.h[..n], &vk.hashed_key,
-                &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+            assert!(!verify_inner(
+                logn,
+                &vk.h[..n],
+                &vk.hashed_key,
+                &e_sig,
+                &DOMAIN_NONE,
+                &HASH_ID_ORIGINAL_FALCON,
+                &e_msg,
+                &mut tmp_i16[..n],
+                &mut tmp_u16[..(2 * n)]
+            ));
             e_sig[50] ^= 0x01;
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
+            #[cfg(all(
+                not(feature = "no_avx2"),
+                any(target_arch = "x86_64", target_arch = "x86")
+            ))]
             if fn_dsa_comm::has_avx2() {
                 unsafe {
-                    assert!(verify_avx2_inner(logn, &vk.h[..n], &vk.hashed_key,
-                        &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+                    assert!(verify_avx2_inner(
+                        logn,
+                        &vk.h[..n],
+                        &vk.hashed_key,
+                        &e_sig,
+                        &DOMAIN_NONE,
+                        &HASH_ID_ORIGINAL_FALCON,
+                        &e_msg,
+                        &mut tmp_i16[..n],
+                        &mut tmp_u16[..(2 * n)]
+                    ));
                     e_msg[0] ^= 0x01;
-                    assert!(!verify_avx2_inner(logn, &vk.h[..n], &vk.hashed_key,
-                        &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+                    assert!(!verify_avx2_inner(
+                        logn,
+                        &vk.h[..n],
+                        &vk.hashed_key,
+                        &e_sig,
+                        &DOMAIN_NONE,
+                        &HASH_ID_ORIGINAL_FALCON,
+                        &e_msg,
+                        &mut tmp_i16[..n],
+                        &mut tmp_u16[..(2 * n)]
+                    ));
                     e_msg[0] ^= 0x01;
                     e_sig[50] ^= 0x01;
-                    assert!(!verify_avx2_inner(logn, &vk.h[..n], &vk.hashed_key,
-                        &e_sig, &DOMAIN_NONE, &HASH_ID_ORIGINAL_FALCON, &e_msg,
-                        &mut tmp_i16[..n], &mut tmp_u16[..(2 * n)]));
+                    assert!(!verify_avx2_inner(
+                        logn,
+                        &vk.h[..n],
+                        &vk.hashed_key,
+                        &e_sig,
+                        &DOMAIN_NONE,
+                        &HASH_ID_ORIGINAL_FALCON,
+                        &e_msg,
+                        &mut tmp_i16[..n],
+                        &mut tmp_u16[..(2 * n)]
+                    ));
                     e_sig[50] ^= 0x01;
                 }
             }
@@ -445,7 +743,6 @@ mod tests {
 
     const KAT_ORIG_512: [&str; 15] = [
         // Each triplet is: public key, message, signature.
-
         concat!(
             "091164798255c8c721e8aa5a4ae3ab9ad824d9f98a81724d26517cd6d2354ceb",
             "51b30a006d40ab3bb8a43f4b50b74000d9b098d0a903291c9eb172b994e1e7af",
@@ -475,7 +772,8 @@ mod tests {
             "6a00644ec178363c13a509208f4f8c83e4d5eebf7e3cbb193018b257798c82f8",
             "6dab852e4900aa41091d72f10101cec640281fe3b1618402893d9607aeba2044",
             "ed42a843b88d32e680fc5b849ae193d4a00cc524993d561b8e112441c9332250",
-            "05"),
+            "05"
+        ),
         "dbd71151d7a9b83b0b6e2556ac824225",
         concat!(
             "39d33b744e2ceadc9c9deb583e2d091f65e623e6dfeafbb27b287137d08ace8f",
@@ -498,8 +796,8 @@ mod tests {
             "c690c637bd33581c6a0cd593c12f79c2a320dd71e203c3184ca08fcfcb0d52e9",
             "6b4d9adec31d2f153a1b76d834ce00b9cc9437d91e74382bc7bd0e609aadbd97",
             "75d0eb15af5575c461a55ba52ed12523649f9ff922a37923c99f49cea601c949",
-            "6f9c0e7e33e77085a7fcd839f789a00000000000000000000000"),
-
+            "6f9c0e7e33e77085a7fcd839f789a00000000000000000000000"
+        ),
         concat!(
             "0961988048dfedb9339d9f0675ec3d4a226b5231083949f1cef92f2190bb29d9",
             "5955c8b406859534012fc28cfc7ba3e71b364f9c5774c8256867840036a54491",
@@ -529,7 +827,8 @@ mod tests {
             "5d27dac9219ca855fce1075b530cd2be55fc9f24356ed27682e4f556917230f7",
             "022735183791c0acfe8645fffa64122ca70a9b596341bc8b546ec1ab107e3210",
             "68d370a61c54a57006d3665ab9d48404ba5d44103aff80bad3fb49a2a8833607",
-            "34"),
+            "34"
+        ),
         "739db98759cac439893b6465d6d56186",
         concat!(
             "395d3457743e6a2ef1cb3ded499c2b1b39bf3d21ef3acff157c1f79596f0f917",
@@ -552,8 +851,8 @@ mod tests {
             "bba08b042da7779385034f0867f9ac54888a318f1234c16d5db4b9bf9184c1cd",
             "d74abdd64d82df097528ff0867e78651ad3733968233b94c2acfe2eaf698ca24",
             "b5e34170ec2c6ad5996b5204fab5c1eff5601d867d5984394e0ac504f5a22df3",
-            "6d9ba8583f5e47aebf2a665a2bbc1e0000000000000000000000"),
-
+            "6d9ba8583f5e47aebf2a665a2bbc1e0000000000000000000000"
+        ),
         concat!(
             "093b34bd8284577727e0c59a64e03a3405f7b20ce267b6f8a4258d815c677e14",
             "63da82cfb78c8e23a61b9242157e745b019958e6b2f4d307fc9746be36390e69",
@@ -583,7 +882,8 @@ mod tests {
             "f11300d960b2b84e8524cb5c7a5a4082e838a24c874509853e998858216093fe",
             "83080fadc3c250deaa308836b4a0df6686758df81388733bc5e5984085204374",
             "e884a58cb787322569f6dc0b7974c8347114b3b87a52351815ff972477f72ee7",
-            "dc"),
+            "dc"
+        ),
         "3e1e8bb76a711ebe49620d0b9f5ed233",
         concat!(
             "398f5641ac1f0c367ebf0fde594fd5d99e2abb98e74abd7d9bf7ae50bf8ad9e4",
@@ -606,8 +906,8 @@ mod tests {
             "2b506f520d61cbd9185a45a5e025f8e61bb115321c9554e57e0f55753f867564",
             "683739cd8d362abe546e8faac365bf49d0eb8e750aa62f6dd374c5aafd293a71",
             "52aa90a5bb1a67720d7f17a57eba6ef87c653fcf5352d0881f8a233a4b5a0233",
-            "62c7a3abd5a6a938e1452ce78200000000000000000000000000"),
-
+            "62c7a3abd5a6a938e1452ce78200000000000000000000000000"
+        ),
         concat!(
             "09b4f4e8a3b89489be092b1727647151652bc563e95c1d1e60e9d268b1a711a5",
             "a1a74be6349a7599b0c6eb3a5948250c1d2d41e0ef52145ef83e2affaa006a25",
@@ -637,7 +937,8 @@ mod tests {
             "e117fab4d084711c525b3b666f6a625fe7796a1a79408622d8df893f70d23696",
             "92861ae17a77968cb19e3d1cf6cfab024ba8bd1b57c3e98f1a2b72bac4e34ab4",
             "7ee3c0d1249a09ee836dd8248ad1d513fc258d0e21dc292f0251ad32cf99ef62",
-            "09"),
+            "09"
+        ),
         "72b73d75c0ccb79130be03e8ec9f602a",
         concat!(
             "397aa5c8ee63cdbd64004f85b317c0d3e472cb55a2ae4f53649815d07b13e9ee",
@@ -660,8 +961,8 @@ mod tests {
             "67e034fb15bef8e9e69c4c8d02d489e95dada7dda15f16174cd47c6cf8e5b77f",
             "cf98274f4519582a2f0d06f98e7d791a758f1afb53c7010977e7b826db228f45",
             "c84ceb7c927672578a831497a2dbcdaa06a3f4aad386592faeebb7ce996d981d",
-            "8de40b05012d09aabbdda9503099beec00000000000000000000"),
-
+            "8de40b05012d09aabbdda9503099beec00000000000000000000"
+        ),
         concat!(
             "0994a823d6b7a7881c5091879d43f0396821920e0b4428756caa72d9688070ab",
             "586328e19b00a035189a8d3bc638f50616558c1d6cc7b5001a89dd2041ad1a53",
@@ -691,7 +992,8 @@ mod tests {
             "2893214ce18e43e1b758b8590641e926605d19aeba84216a9597b3a358a872f0",
             "aab9848d1d924563427355fe1704db5a3942aad618da50b394dd40dd257c2438",
             "2136c36be55e45ca5abc90045ec519f8aec0276aa4a47b0dc20eacc98b288250",
-            "86"),
+            "86"
+        ),
         "880abe67dfaa4bf4a9cdd51a369a3374",
         concat!(
             "39101627b19c37ac086baa20094e9860e3b23038bf71d819c0d10f9f4fd6d4a1",
@@ -714,12 +1016,12 @@ mod tests {
             "3bb8c332d109a1b821d4af953f7994796b5fc439578063497c3a1378f3a3d68e",
             "133bc2c1637e2f3a3100c0c718e635948239344563c5c4700ebe5fc46fc8c901",
             "a6a7bf6d965a010098407debc7e960663af2fc5e94c8bbcac506a0677429077f",
-            "3ad3909a7d91cecc2c5014ccc5a0000000000000000000000000"),
+            "3ad3909a7d91cecc2c5014ccc5a0000000000000000000000000"
+        ),
     ];
 
     const KAT_ORIG_1024: [&str; 15] = [
         // Each triplet is: public key, message, signature.
-
         concat!(
             "0aab5887ca451b1e5cf5464503dca9b5f44c3a7786a9b1648014f224b4a11648",
             "40584034104513f614af92440417c0086b513a5514d01ccfb4b53d7c583dc90c",
@@ -777,7 +1079,8 @@ mod tests {
             "3106e1d2037780b6f488cdc322ae4d46d6c44a713bde0927455c5338808458fb",
             "5eda901939086eca0e16ce43354f42e6baa1c1c5afdc7a0a9e42e27e87d7aad6",
             "6013d01767692a90f785190571316000e8501e3d1e364577a7798b31b061b211",
-            "66"),
+            "66"
+        ),
         "b87670516460a6ea2cc450374b6c1cb6",
         concat!(
             "3a12b43c773f49a7d7ac4c1ca469c72aa64c6a0227bba8bb7b86e48cddc9346d",
@@ -819,8 +1122,8 @@ mod tests {
             "f2ec383361a3fb501da93451ba446b9c31fb86d7ef4d96af3732bd4f1f747162",
             "4593a49fd08e6d37854bd4d62a9506da63866634a8982ec8811618d2d04f2b50",
             "84aeefd2f9ffefc99265535960f33bfebad326107646c3a3ce14d69e568d6f53",
-            "56708a26cdf68ef885278b0ca2f5105fb459d800000000000000000000000000"),
-
+            "56708a26cdf68ef885278b0ca2f5105fb459d800000000000000000000000000"
+        ),
         concat!(
             "0a2f5e87e0e89898aa05b1f3a2175488cc05352f4ba760ad56733c16708499b5",
             "698ecca29d089d858f9abf1398c9347aad0891a500d929c61590469250d1860e",
@@ -878,7 +1181,8 @@ mod tests {
             "896e5bb69ebb05ed9d890748b3aad165e981855635f141196ae2774d569fa647",
             "0a433dd5d16b9dda0432b4f3c4d6a497624908bafcc767bfcabad6d501a4784a",
             "01b96685537b3a6fc0395c0a56e4d6761cdde5acfc6d478f51b392799ef0704e",
-            "3f"),
+            "3f"
+        ),
         "b03c5bbb3a51e467c36a19f4cc49313c",
         concat!(
             "3a84511e91366f0adba5aa4c496a27dc9d750cedaf5e27499d10cd8f1285f435",
@@ -920,8 +1224,8 @@ mod tests {
             "8a3887abdaf2058b13ef190553e3e9bd6100850df565e3f6b993f2619ccadc8c",
             "edc591260e04cbd6678e240d2b6a19a47d8adcfe190b4b6772816a679264e105",
             "c1a1ac2c2d2ae823a6c90fd827796232ea59675dd833d2dfc19ec7656008252a",
-            "9dad9647f6321fb7230dfbbfe253aa5fe7ff119a69880a3db940000000000000"),
-
+            "9dad9647f6321fb7230dfbbfe253aa5fe7ff119a69880a3db940000000000000"
+        ),
         concat!(
             "0a48ced6450a20ab57dc6041b221a16aba0f1aeec2798011b626774466213578",
             "b670cbfd786aff3afcc90884eed9f43ad6e5529106d568d76d5c1e58e319ada3",
@@ -979,7 +1283,8 @@ mod tests {
             "8c2bd0740bae12f940050e51d426619220114a1224f80b094f2b3c6711334551",
             "eb42b3d5acc3f61b944c18488a69cddba8c91c52875c0d69e4d9016f6c423891",
             "08b95402049ede34a64d59c88ccd3846d6c93147b633167baea2a4ae8a05ad5b",
-            "ce"),
+            "ce"
+        ),
         "cfa02e8b83e98e74ef228bf1750fb359",
         concat!(
             "3a3f39d10d0e17e01ac0c3cf9d12662409f30c601cc4bf1516966f1ed6b7f3c6",
@@ -1021,8 +1326,8 @@ mod tests {
             "b0ca2adbd867d70a49b71aeeb31150ddbdfe288c4f7cc3d37faaaeff58a14db7",
             "d05305942b5eca66938e72aa081f0f6d1b83907c7f6b62e5a03152dadf2c51c1",
             "ed66336449271cb6463f357826c61f74a54da4d609774e153c2d52d4656042b1",
-            "c42cb64699d935096a390867d7e1319730d9ce7c1e0000000000000000000000"),
-
+            "c42cb64699d935096a390867d7e1319730d9ce7c1e0000000000000000000000"
+        ),
         concat!(
             "0a564dc27a0b6cd1265cf75b32d6cfa164ceb183c515315e030acc4c2539a680",
             "f57a856f03f014f2068eb97a4a7751fb92820aecd84188ac1d333a05abda4d48",
@@ -1080,7 +1385,8 @@ mod tests {
             "cc5664631c6e64053b3a2bafdc9cd6227219e1654538eaf27eac2506f5b322bb",
             "26a47692f163abd8c191d999c3af12989dac6d70861f957b8ea8973643db4a80",
             "8f1af6a70e5a76746b09193771513244eaa5174879c8f10e19430028c8363dc9",
-            "84"),
+            "84"
+        ),
         "f8c391dbdf424c65b433d5d57a61d162",
         concat!(
             "3a196b2695aea2d588709f621252cc22531bac24a01ed3ffc4da53d96fc38568",
@@ -1122,8 +1428,8 @@ mod tests {
             "502c51bceec20336d00d53b1e4da2dd44b9c7a51268bb58aea99a14b60c71371",
             "9b291c7d0d3aa5be337f5e24fa011b65e9a8ff904ad95fbad5a891a06c947dd9",
             "e84e5b984279a76c1ad4866f15e9ec50931ad9b7e56362fff18dd33036b5a743",
-            "d289fbd02fa22cfc56d19cf6b260a7ff970f63a9a049f9300000000000000000"),
-
+            "d289fbd02fa22cfc56d19cf6b260a7ff970f63a9a049f9300000000000000000"
+        ),
         concat!(
             "0aa9c546c92890a65819717bff23201b5a9669556ffb40966d10a95fd957e2f1",
             "5796112db45aceca20cb740ecd68b2725b8b48ac84129463ee0f5da5c6415bea",
@@ -1181,7 +1487,8 @@ mod tests {
             "849c593d667e480ddf551b08938e5e4be18864604d2673b0ca110b0e4e51f1e2",
             "adb653edd893dd44d96e46bee5519aaeb044e18a409e7f4faefb4af36a923a41",
             "b43b3d20c9868980716b5ec78c1e30b7bb4a7d0f9de7cb1c8ef35d204832a9ca",
-            "de"),
+            "de"
+        ),
         "358512bd1797531ea6c247a31ce8387e",
         concat!(
             "3ae330462a7a92248de80736ff6fc7a0f82e536d1938ea2320e59ee0dba338b4",
@@ -1223,6 +1530,7 @@ mod tests {
             "99415544f7b7fec7a6b066ea584037533a339960318e5e65cf43596392bc6f22",
             "8c74bb79b3a49628c4f0a2d4f39d1873d695bca24870d2521e8f2564898fe26d",
             "9047232080e0b82bf7d2303dd66c190c532c9bf4bfeb5e9dcab9c7ac8ba52bc1",
-            "0219fcec3a844ac88eae83ac80ba90f75e0093204a8b2d000000000000000000"),
+            "0219fcec3a844ac88eae83ac80ba90f75e0093204a8b2d000000000000000000"
+        ),
     ];
 }
