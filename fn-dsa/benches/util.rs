@@ -1,4 +1,4 @@
-use fn_dsa::{CryptoRng, RngCore, RngError};
+use fn_dsa::{TryCryptoRng, TryRng, RngError};
 use fn_dsa_comm::shake::{SHAKE256};
 
 #[cfg(target_arch = "x86")]
@@ -52,23 +52,21 @@ impl FakeRNG {
     }
 }
 
-impl CryptoRng for FakeRNG {}
-impl RngCore for FakeRNG {
-    fn next_u32(&mut self) -> u32 {
+impl TryCryptoRng for FakeRNG {}
+impl TryRng for FakeRNG {
+    type Error = RngError;
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
         let mut buf = [0u8; 4];
         self.0.extract(&mut buf);
-        u32::from_le_bytes(buf)
+        Ok(u32::from_le_bytes(buf))
     }
-    fn next_u64(&mut self) -> u64 {
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
         let mut buf = [0u8; 8];
         self.0.extract(&mut buf);
-        u64::from_le_bytes(buf)
-    }
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.0.extract(dest);
+        Ok(u64::from_le_bytes(buf))
     }
     fn try_fill_bytes(&mut self, dest: &mut [u8])
-        -> Result<(), RngError>
+        -> Result<(), Self::Error>
     {
         self.0.extract(dest);
         Ok(())

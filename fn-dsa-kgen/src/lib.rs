@@ -8,7 +8,7 @@
 //! uses some temporary buffers which are held in an instance that
 //! follows the trait `KeyPairGenerator`, on which the `keygen()` method
 //! can be called. A cryptographically secure random source (e.g.
-//! [`OsRng`]) must be provided as parameter; the generator will extract
+//! [`SysRng`]) must be provided as parameter; the generator will extract
 //! an initial seed from it, then work deterministically from that seed.
 //! The output is a signing (private) key and a verifying (public) key,
 //! both encoded as a sequence of bytes with a given fixed length.
@@ -47,7 +47,7 @@
 //! ## Example usage
 //!
 //! ```ignore
-//! use rand_core::OsRng;
+//! use rand_core::SysRng;
 //! use fn_dsa_kgen::{
 //!     sign_key_size, vrfy_key_size, FN_DSA_LOGN_512,
 //!     KeyPairGenerator, KeyPairGeneratorStandard,
@@ -56,10 +56,12 @@
 //! let mut kg = KeyPairGeneratorStandard::default();
 //! let mut sign_key = [0u8; sign_key_size(FN_DSA_LOGN_512)];
 //! let mut vrfy_key = [0u8; vrfy_key_size(FN_DSA_LOGN_512)];
-//! kg.keygen(FN_DSA_LOGN_512, &mut OsRng, &mut sign_key, &mut vrfy_key);
+//! // SysRng implements TryRng; to use it as an infallible Rng, wrap it
+//! // with rand_core::UnwrapErr.
+//! kg.keygen(FN_DSA_LOGN_512, &mut rand_core::UnwrapErr(SysRng), &mut sign_key, &mut vrfy_key);
 //! ```
 //!
-//! [`OsRng`]: https://docs.rs/rand_core/0.6.4/rand_core/struct.OsRng.html
+//! [`SysRng`]: https://docs.rs/getrandom/latest/getrandom/struct.SysRng.html
 
 mod fxp;
 mod gauss;
@@ -94,7 +96,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 pub use fn_dsa_comm::{
     sign_key_size, vrfy_key_size,
     FN_DSA_LOGN_512, FN_DSA_LOGN_1024,
-    CryptoRng, RngCore, RngError,
+    CryptoRng, Rng, RngError,
 };
 
 /// Key pair generator and temporary buffers.
@@ -117,7 +119,7 @@ pub trait KeyPairGenerator: Default {
     /// destination slices MUST have the exact size for their respective
     /// contents (see the `sign_key_size()` and `vrfy_key_size()`
     /// functions).
-    fn keygen<T: CryptoRng + RngCore>(&mut self,
+    fn keygen<T: CryptoRng + Rng>(&mut self,
         logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8]);
 }
 
@@ -136,7 +138,7 @@ macro_rules! kgen_impl {
 
     impl KeyPairGenerator for $typename {
 
-        fn keygen<T: CryptoRng + RngCore>(&mut self,
+        fn keygen<T: CryptoRng + Rng>(&mut self,
             logn: u32, rng: &mut T, sign_key: &mut [u8], vrfy_key: &mut [u8])
         {
             // Enforce minimum and maximum degree.
@@ -192,7 +194,7 @@ kgen_impl!(KeyPairGeneratorWeak, 2, 8);
 //   tmp_u16: 2*n
 //   tmp_u32: 6*n
 //   tmp_fxr: 2.5*n
-fn keygen_inner<T: CryptoRng + RngCore>(logn: u32, rng: &mut T,
+fn keygen_inner<T: CryptoRng + Rng>(logn: u32, rng: &mut T,
     sign_key: &mut [u8], vrfy_key: &mut [u8],
     tmp_i8: &mut [i8], tmp_u16: &mut [u16],
     tmp_u32: &mut [u32], tmp_fxr: &mut [fxp::FXR])

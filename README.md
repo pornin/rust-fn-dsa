@@ -296,7 +296,7 @@ run).
 An example usage code looks as follows:
 
 ```rust
-use rand_core::OsRng;
+use rand_core::SysRng;
 use fn_dsa::{
     sign_key_size, vrfy_key_size, signature_size, FN_DSA_LOGN_512,
     KeyPairGenerator, KeyPairGeneratorStandard,
@@ -309,12 +309,14 @@ use fn_dsa::{
 let mut kg = KeyPairGeneratorStandard::default();
 let mut sign_key = [0u8; sign_key_size(FN_DSA_LOGN_512)];
 let mut vrfy_key = [0u8; vrfy_key_size(FN_DSA_LOGN_512)];
-kg.keygen(FN_DSA_LOGN_512, &mut OsRng, &mut sign_key, &mut vrfy_key);
+// SysRng implements TryRng; to use it as an infallible Rng, wrap it
+// with rand_core::UnwrapErr.
+kg.keygen(FN_DSA_LOGN_512, &mut rand_core::UnwrapErr(SysRng), &mut sign_key, &mut vrfy_key);
 
 // Sign a message with the signing key.
-let mut sk = SigningKeyStandard::decode(&sign_key).or_else(...);
+let mut sk = SigningKeyStandard::decode(&sign_key).unwrap();
 let mut sig = vec![0u8; signature_size(sk.get_logn())];
-sk.sign(&mut OsRng, &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
+sk.sign(&mut rand_core::UnwrapErr(SysRng), &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
 
 // Verify a signature with the verifying key.
 match VerifyingKeyStandard::decode(&vrfy_key) {

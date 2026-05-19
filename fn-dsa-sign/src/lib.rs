@@ -47,7 +47,7 @@
 //! ## Example usage
 //!
 //! ```ignore
-//! use rand_core::OsRng;
+//! use rand_core::SysRng;
 //! use fn_dsa_sign::{
 //!     sign_key_size, signature_size, FN_DSA_LOGN_512,
 //!     SigningKey, SigningKeyStandard,
@@ -56,7 +56,9 @@
 //! 
 //! let mut sk = SigningKeyStandard::decode(encoded_signing_key)?;
 //! let mut sig = vec![0u8; signature_size(sk.get_logn())];
-//! sk.sign(&mut OsRng, &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
+//! // SysRng implements TryRng; to use it as an infallible Rng, wrap it
+//! // with rand_core::UnwrapErr.
+//! sk.sign(&mut rand_core::UnwrapErr(SysRng), &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
 //! ```
 
 mod flr;
@@ -84,7 +86,7 @@ pub use fn_dsa_comm::{
     HASH_ID_SHAKE256,
     DomainContext,
     DOMAIN_NONE,
-    CryptoRng, RngCore, RngError,
+    CryptoRng, TryCryptoRng, Rng, TryRng, RngError,
 };
 
 /// Signing key handler and temporary buffers.
@@ -130,7 +132,7 @@ pub trait SigningKey: Sized {
     ///  - `sig`: the output slice for the generated signature; its size
     ///    MUST be exactly that expected for the key degree (see
     ///    `signature_size()`).
-    fn sign<T: CryptoRng + RngCore>(&mut self, rng: &mut T,
+    fn sign<T: CryptoRng + Rng>(&mut self, rng: &mut T,
         ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8]);
 }
 
@@ -249,7 +251,7 @@ macro_rules! sign_key_impl {
             vrfy_key.copy_from_slice(&self.vrfy_key[..len]);
         }
 
-        fn sign<T: CryptoRng + RngCore>(&mut self, rng: &mut T,
+        fn sign<T: CryptoRng + Rng>(&mut self, rng: &mut T,
             ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8])
         {
             let n = 1usize << self.logn;
@@ -438,7 +440,7 @@ fn compute_basis_inner(logn: u32,
 // 1/12289
 const INV_Q: flr::FLR = flr::FLR::scaled(6004310871091074, -66);
 
-fn sign_inner<T: CryptoRng + RngCore, P: PRNG>(logn: u32, rng: &mut T,
+fn sign_inner<T: CryptoRng + Rng, P: PRNG>(logn: u32, rng: &mut T,
     f: &[i8], g: &[i8], F: &[i8], G: &[i8], hashed_vrfy_key: &[u8],
     ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8],
     #[cfg(not(feature = "small_context"))]
@@ -1097,20 +1099,18 @@ pub(crate) mod tests {
 
     // Fake CryptoRng that returns only predefined data, for test purposes.
     struct FakeCryptoRng(usize);
-    impl CryptoRng for FakeCryptoRng {}
-    impl RngCore for FakeCryptoRng {
-        fn next_u32(&mut self) -> u32 {
+    impl TryCryptoRng for FakeCryptoRng {}
+    impl TryRng for FakeCryptoRng {
+        type Error = RngError;
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
             unimplemented!();
         }
-        fn next_u64(&mut self) -> u64 {
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
             unimplemented!();
         }
-        fn fill_bytes(&mut self, dest: &mut [u8]) {
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
             dest.copy_from_slice(&KAT_512_RND[self.0..(self.0 + dest.len())]);
             self.0 += dest.len();
-        }
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
-            self.fill_bytes(dest);
             Ok(())
         }
     }
