@@ -60,7 +60,7 @@
 //! ## Example usage
 //!
 //! ```ignore
-//! use rand_core::OsRng;
+//! use rand_core::SysRng;
 //! use fn_dsa::{
 //!     sign_key_size, vrfy_key_size, signature_size, FN_DSA_LOGN_512,
 //!     KeyPairGenerator, KeyPairGeneratorStandard,
@@ -73,12 +73,14 @@
 //! let mut kg = KeyPairGeneratorStandard::default();
 //! let mut sign_key = [0u8; sign_key_size(FN_DSA_LOGN_512)];
 //! let mut vrfy_key = [0u8; vrfy_key_size(FN_DSA_LOGN_512)];
-//! kg.keygen(FN_DSA_LOGN_512, &mut OsRng, &mut sign_key, &mut vrfy_key);
+//! // SysRng implements TryRng; to use it as an infallible Rng, wrap it
+//! // with rand_core::UnwrapErr.
+//! kg.keygen(FN_DSA_LOGN_512, &mut rand_core::UnwrapErr(SysRng), &mut sign_key, &mut vrfy_key);
 //! 
 //! // Sign a message with the signing key.
 //! let mut sk = SigningKeyStandard::decode(encoded_signing_key)?;
 //! let mut sig = vec![0u8; signature_size(sk.get_logn())];
-//! sk.sign(&mut OsRng, &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
+//! sk.sign(&mut rand_core::UnwrapErr(SysRng), &DOMAIN_NONE, &HASH_ID_RAW, b"message", &mut sig);
 //! 
 //! // Verify a signature with the verifying key.
 //! match VerifyingKeyStandard::decode(encoded_verifying_key) {
@@ -120,7 +122,7 @@ pub use fn_dsa_comm::{
     HASH_ID_SHAKE256,
     DomainContext,
     DOMAIN_NONE,
-    CryptoRng, RngCore, RngError,
+    CryptoRng, TryCryptoRng, Rng, TryRng, RngError,
 };
 pub use fn_dsa_comm::shake::{SHAKE, SHAKE128, SHAKE256, SHA3_224, SHA3_256, SHA3_384, SHA3_512};
 pub use fn_dsa_kgen::{KeyPairGenerator, KeyPairGeneratorStandard, KeyPairGeneratorWeak, KeyPairGenerator512, KeyPairGenerator1024};
@@ -150,15 +152,13 @@ mod tests {
             Self(sh)
         }
     }
-    impl CryptoRng for FakeRng1 {}
-    impl RngCore for FakeRng1 {
-        fn next_u32(&mut self) -> u32 { unimplemented!(); }
-        fn next_u64(&mut self) -> u64 { unimplemented!(); }
-        fn fill_bytes(&mut self, dest: &mut [u8]) {
+    impl TryCryptoRng for FakeRng1 {}
+    impl TryRng for FakeRng1 {
+        type Error = RngError;
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> { unimplemented!(); }
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> { unimplemented!(); }
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
             self.0.extract(dest);
-        }
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
-            self.fill_bytes(dest);
             Ok(())
         }
     }
@@ -176,11 +176,12 @@ mod tests {
             Self { sh, buf: [0u8; 96], ptr: 96, ctr: 0 }
         }
     }
-    impl CryptoRng for FakeRng2 {}
-    impl RngCore for FakeRng2 {
-        fn next_u32(&mut self) -> u32 { unimplemented!(); }
-        fn next_u64(&mut self) -> u64 { unimplemented!(); }
-        fn fill_bytes(&mut self, dest: &mut [u8]) {
+    impl TryCryptoRng for FakeRng2 {}
+    impl TryRng for FakeRng2 {
+        type Error = RngError;
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> { unimplemented!(); }
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> { unimplemented!(); }
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
             let mut j = 0;
             let mut ptr = self.ptr;
             while j < dest.len() {
@@ -198,9 +199,6 @@ mod tests {
                 j += clen;
             }
             self.ptr = ptr;
-        }
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
-            self.fill_bytes(dest);
             Ok(())
         }
     }
