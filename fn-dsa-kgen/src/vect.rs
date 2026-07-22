@@ -104,25 +104,11 @@ pub(crate) fn vect_to_fxr(logn: u32, d: &mut [FXR], f: &[i8]) {
     }
 }
 
-// Add vector b to vector a. This works in both real and FFT representations.
-pub(crate) fn vect_add(logn: u32, a: &mut [FXR], b: &[FXR]) {
-    for i in 0..(1usize << logn) {
-        a[i] += b[i];
-    }
-}
-
 // Multiply vector a by constant c. This works in both real and FFT
 // representations.
 pub(crate) fn vect_mul_realconst(logn: u32, a: &mut [FXR], c: FXR) {
     for i in 0..(1usize << logn) {
         a[i] *= c;
-    }
-}
-
-// Multiply vector a by 2^e. Exponent e should be in the [0,30] range.
-pub(crate) fn vect_mul2e(logn: u32, a: &mut [FXR], e: u32) {
-    for i in 0..(1usize << logn) {
-        a[i].set_mul2e(e);
     }
 }
 
@@ -175,16 +161,6 @@ pub(crate) fn vect_div_selfadj_fft(logn: u32, a: &mut [FXR], b: &[FXR]) {
     }
 }
 
-// Compute d = a*adj(a) + b*adj(b). Polynomials are in FFT representation.
-// Since d is self-adjoint, it is half-size (only the low half is set, the
-// high half is implicitly zero).
-pub(crate) fn vect_norm_fft(logn: u32, d: &mut [FXR], a: &[FXR], b: &[FXR]) {
-    let hn = 1usize << (logn - 1);
-    for i in 0..hn {
-        d[i] = a[i].sqr() + a[i + hn].sqr() + b[i].sqr() + b[i + hn].sqr();
-    }
-}
-
 // Compute d = (2^e)/(a*adj(a) + b*adj(b)). Polynomials are in FFT
 // representation. Since d is self-adjoint, it is half-size (only the
 // low half is set, the high half is implicitly zero).
@@ -197,6 +173,19 @@ pub(crate) fn vect_invnorm_fft(logn: u32, d: &mut [FXR],
         let z1 = a[i].sqr() + a[i + hn].sqr();
         let z2 = b[i].sqr() + b[i + hn].sqr();
         d[i] = r / (z1 + z2);
+    }
+}
+
+// Replace a with 2^e/a. Polynomial is in FFT representation.
+pub(crate) fn vect_inv_mul2e_fft(logn: u32, a: &mut [FXR], e: u32)
+{
+    let hn = 1usize << (logn - 1);
+    for i in 0..hn {
+        let re = a[i];
+        let im = -a[i + hn];
+        let z = a[i].sqr() + a[i + hn].sqr();
+        a[i] = re.mul2e(e) / z;
+        a[i + hn] = im.mul2e(e) / z;
     }
 }
 

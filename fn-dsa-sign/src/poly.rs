@@ -2606,10 +2606,10 @@ mod tests {
 
     use super::*;
     use crate::flr::FLR;
-    use fn_dsa_comm::shake::SHAKE256;
-    use crate::tests::SHAKE256x4;
+    use fn_dsa_comm::PRNG;
+    use fn_dsa_comm::shake::{SHAKE256, SHAKE256_PRNG};
 
-    fn rand_poly(rng: &mut SHAKE256x4, f: &mut [FLR]) {
+    fn rand_poly(rng: &mut SHAKE256_PRNG, f: &mut [FLR]) {
         for i in 0..f.len() {
             f[i] = FLR::from_i64(((rng.next_u16() & 0x3FF) as i64) - 512);
         }
@@ -2618,7 +2618,7 @@ mod tests {
     fn poly_inner(logn: u32) {
         let n = 1usize << logn;
         let hn = n >> 1;
-        let mut rng = SHAKE256x4::new(&[logn as u8]);
+        let mut rng = SHAKE256_PRNG::new(&[logn as u8]);
         let mut tmp = [FLR::ZERO; 5 * 1024];
         let (f, tmp) = tmp.split_at_mut(n);
         let (g, tmp) = tmp.split_at_mut(n);

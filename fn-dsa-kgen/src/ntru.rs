@@ -38,7 +38,9 @@ pub(crate) fn check_ortho_norm(
     for i in 0..n {
         sn += fx[i].sqr() + gx[i].sqr();
     }
-    sn < FXR::from_u64_scaled32(72251709809335)
+    // Constant is (0.999*1.17*sqrt(q))^2, scaled up by 2^32 for the
+    // fixed-point representation.
+    sn < FXR::from_u64_scaled32(72107278641426)
 }
 
 const Q: u32 = 12289;
@@ -56,7 +58,7 @@ const MOD_SMALL_BL: [usize; 11] = [ 1, 1, 2, 3,  4,  8, 14, 27,  53, 104, 207 ];
 const MOD_LARGE_BL: [usize; 10] = [ 1, 2, 3, 6, 11, 21, 40, 78, 155, 308 ];
 
 // Minimum depth for which intermediate (f,g) values are saved.
-const MIN_SAVE_FG: [u32; 11] = [ 0, 0, 1, 2, 2, 2, 2, 2, 2, 3, 3 ];
+const MIN_SAVE_FG: [u32; 11] = [ 0, 0, 1, 2, 2, 2, 2, 2, 3, 3, 4 ];
 
 // When log(n) >= MIN_LOGN_FGNTT, we use the NTT to subtract (k*f,k*g)
 // from (F,G) during the reduction.
@@ -66,7 +68,7 @@ const MIN_LOGN_FGNTT: u32 = 4;
 const WORD_WIN: [usize; 10] = [ 1, 1, 2, 2, 2, 3, 3, 4, 5, 7 ];
 
 // Number of bits gained per each round of reduction.
-const REDUCE_BITS: [u32; 11] = [ 16, 16, 16, 16, 16, 16, 16, 16, 16, 13, 11 ];
+const REDUCE_BITS: [u32; 11] = [ 10, 10, 10, 10, 10, 10, 10, 10, 10, 9, 8 ];
 
 // Given polynomials f and g (modulo X^n+1 with n = 2^logn), find
 // polynomials F and G such that:
@@ -75,8 +77,8 @@ const REDUCE_BITS: [u32; 11] = [ 16, 16, 16, 16, 16, 16, 16, 16, 16, 13, 11 ];
 // Returned value is true on success, false on error. If the function does
 // not succeed, then the contents of F and G are not modified.
 // All four slices f, g, F and G must have length exactly 2^logn.
-// tmp_u32 min size: 6*n
-// tmp_fxr min size: 2.5*n
+// tmp_u32 min size: 5*n
+// tmp_fxr min size: 2*n
 pub(crate) fn solve_NTRU(logn: u32,
     f: &[i8], g: &[i8], F: &mut [i8], G: &mut [i8],
     tmp_u32: &mut [u32], tmp_fxr: &mut [FXR]) -> bool
@@ -128,11 +130,7 @@ fn solve_NTRU_deepest(logn: u32,
     // Get (f,g) at the deepest level. Obtained (f,g) are in RNS+NTT;
     // since degree is 1 at the deepest level, then NTT is a no-op and
     // we have (f,g) in RNS.
-    if !make_fg_deepest(logn, f, g, tmp) {
-        // f is not invertible modulo X^n+1 and modulo P0, we reject
-        // that case.
-        return false;
-    }
+    make_fg_deepest(logn, f, g, tmp);
 
     // Reorganize work area:
     //   Fp   output F (slen)
@@ -159,12 +157,13 @@ fn solve_NTRU_deepest(logn: u32,
     }
 
     // Multiply the obtained (F,G) by q to get a solution f*G - g*F = q.
-    if zint_mul_small(Fp, Q) != 0 || zint_mul_small(Gp, Q) != 0 {
-        // If either multiplication overflows, we reject.
-        return false
+    // We only multiply F since G is dropped.
+    if zint_mul_small(Fp, Q) != 0 {
+        // If the multiplication overflows, we reject.
+        return false;
     }
 
-    return true;
+    true
 }
 
 // Solving the NTRU equation, intermediate level.
@@ -177,8 +176,8 @@ fn solve_NTRU_intermediate(logn_top: u32,
     let hn = n >> 1;
 
     // slen   size for (f,g) at this level (and also output (F,G))
-    // llen   size for unreduced (F,G) at this level
-    // tlen   size for (F,G) from the deeper level
+    // llen   size for unreduced F at this level
+    // tlen   size for F from the deeper level
     // Note: we always have llen >= tlen
     let slen = MOD_SMALL_BL[depth as usize];
     let llen = MOD_LARGE_BL[depth as usize];
@@ -186,49 +185,43 @@ fn solve_NTRU_intermediate(logn_top: u32,
 
     // Input layout:
     //   Fd   F from deeper level (tlen * hn)
-    //   Gd   G from deeper level (tlen * hn)
-    // Fd and Gd are in plain representation.
+    // Fd is in plain representation.
 
     // Get (f,g) for this level.
     let min_sav = MIN_SAVE_FG[logn_top as usize];
     if depth < min_sav {
         // (f,g) were not saved previously, recompute them.
         make_fg_intermediate(logn_top, f, g, depth,
-            &mut tmp_u32[(2 * tlen * hn)..]);
+            &mut tmp_u32[(tlen * hn)..]);
     } else {
         // (f,g) were saved previously, get them.
         let mut sav_off = tmp_u32.len();
         for d in min_sav..(depth + 1) {
             sav_off -= MOD_SMALL_BL[d as usize] << (logn_top + 1 - d);
         }
-        tmp_u32.copy_within(sav_off..(sav_off + 2 * slen * n), 2 * tlen * hn);
+        tmp_u32.copy_within(sav_off..(sav_off + 2 * slen * n), tlen * hn);
     }
 
     // Current layout:
     //   Fd   F from deeper level (tlen * hn)
-    //   Gd   G from deeper level (tlen * hn)
     //   ft   f from this level (slen * n)
     //   gt   g from this level (slen * n)
     // We now move things to this layout:
     //   Ft   F from this level (unreduced) (llen * n)
-    //   Gt   G from this level (unreduced) (llen * n)
     //   ft   f from this level (slen * n) (RNS+NTT)
     //   gt   g from this level (slen * n) (RNS+NTT)
     //   Fd   F from deeper level (tlen * hn) (plain)
-    //   Gd   G from deeper level (tlen * hn) (plain)
-    tmp_u32.copy_within(0..(2 * tlen * hn), 2 * (llen + slen) * n);
+    tmp_u32.copy_within(0..(tlen * hn), (llen + 2 * slen) * n);
     tmp_u32.copy_within(
-        (2 * tlen * hn)..(2 * tlen * hn + 2 * slen * n), 2 * llen * n);
+        (tlen * hn)..(tlen * hn + 2 * slen * n), llen * n);
 
-    // Convert Fd and Gd to RNS, with output temporarily stored in (Ft, Gt).
-    // Fd and Gd have degree hn only; we store the values for each modulus p
+    // Convert Fd to RNS, with output temporarily stored in Ft.
+    // Fd has degree hn only; we store the values for each modulus p
     // in the _last_ hn slots of the n-word line for that modulus.
     {
         let (Ft, work) = tmp_u32[..].split_at_mut(llen * n);
-        let (Gt, work) = work.split_at_mut(llen * n);
         let (_, work) = work.split_at_mut(2 * slen * n);  // ft and gt
-        let (Fd, work) = work.split_at_mut(tlen * hn);
-        let (Gd, _) = work.split_at_mut(tlen * hn);
+        let (Fd, _) = work.split_at_mut(tlen * hn);
         for i in 0..llen {
             let p = PRIMES[i].p;
             let p0i = PRIMES[i].p0i;
@@ -238,20 +231,18 @@ fn solve_NTRU_intermediate(logn_top: u32,
             for j in 0..hn {
                 Ft[kt + j] = zint_mod_small_signed(
                     &Fd[j..], tlen, hn, p, p0i, R2, Rx);
-                Gt[kt + j] = zint_mod_small_signed(
-                    &Gd[j..], tlen, hn, p, p0i, R2, Rx);
             }
         }
     }
 
-    // Fd and Gd are no longer needed.
+    // Fd is no longer needed.
 
-    // Compute (F,G) (unreduced) modulo sufficiently many small primes.
+    // Compute F (unreduced) modulo sufficiently many small primes.
     // We also un-NTT (f,g) as we go; when slen primes have been processed,
     // we have (f,g) in RNS, and we apply the CRT to get (f,g) in plain
     // representation.
     {
-        let (FGt, work) = tmp_u32[..].split_at_mut(2 * llen * n);
+        let (Ft, work) = tmp_u32[..].split_at_mut(llen * n);
         let (fgt, work) = work.split_at_mut(2 * slen * n);  // ft and gt
         for i in 0..llen {
             let p = PRIMES[i].p;
@@ -260,62 +251,47 @@ fn solve_NTRU_intermediate(logn_top: u32,
 
             // Memory layout:
             //   Ft    (n * llen)
-            //   Gt    (n * llen)
             //   ft    (n * slen)
             //   gt    (n * slen)
             //   gm    NTT support (n)
             //   igm   iNTT support (n)
-            //   fx    temporary f mod p (NTT) (n)
             //   gx    temporary g mod p (NTT) (n)
             {
-                let (Ft, Gt) = FGt.split_at_mut(llen * n);
                 let (ft, gt) = fgt.split_at_mut(slen * n);
                 let (gm, work) = work.split_at_mut(n);
                 let (igm, work) = work.split_at_mut(n);
-                let (fx, work) = work.split_at_mut(n);
                 let (gx, _) = work.split_at_mut(n);
 
                 mp_mkgmigm(logn, PRIMES[i].g, PRIMES[i].ig, p, p0i, gm, igm);
                 if i < slen {
-                    fx.copy_from_slice(&ft[(i * n)..((i + 1) * n)]);
                     gx.copy_from_slice(&gt[(i * n)..((i + 1) * n)]);
                     mp_iNTT(logn, &mut ft[(i * n)..((i + 1) * n)], igm, p, p0i);
                     mp_iNTT(logn, &mut gt[(i * n)..((i + 1) * n)], igm, p, p0i);
                 } else {
                     let Rx = mp_Rx31(slen as u32, p, p0i, R2);
                     for j in 0..n {
-                        fx[j] = zint_mod_small_signed(
-                            &ft[j..], slen, n, p, p0i, R2, Rx);
                         gx[j] = zint_mod_small_signed(
                             &gt[j..], slen, n, p, p0i, R2, Rx);
                     }
-                    mp_NTT(logn, fx, gm, p, p0i);
                     mp_NTT(logn, gx, gm, p, p0i);
                 }
 
-                // We have (F,G) in RNS in Ft and Gt; we apply the NTT
-                // modulo p. Note that we can use gm (generated for degree
-                // n) for an NTT with degree hn = n/2.
+                // We have F in RNS in Ft; we apply the NTT modulo p. Note
+                // that we can use gm (generated for degree n) for an NTT
+                // with degree hn = n/2.
                 let kt = i * n + hn;
                 mp_NTT(logn - 1, &mut Ft[kt..(kt + hn)], gm, p, p0i);
-                mp_NTT(logn - 1, &mut Gt[kt..(kt + hn)], gm, p, p0i);
 
-                // Compute F and G (unreduced) modulo p.
+                // Compute F (unreduced) modulo p.
                 let kt = i * n;
                 for j in 0..hn {
-                    let fa = fx[2 * j + 0];
-                    let fb = fx[2 * j + 1];
                     let ga = gx[2 * j + 0];
                     let gb = gx[2 * j + 1];
                     let mFp = mp_mmul(Ft[kt + hn + j], R2, p, p0i);
-                    let mGp = mp_mmul(Gt[kt + hn + j], R2, p, p0i);
                     Ft[kt + 2 * j + 0] = mp_mmul(gb, mFp, p, p0i);
                     Ft[kt + 2 * j + 1] = mp_mmul(ga, mFp, p, p0i);
-                    Gt[kt + 2 * j + 0] = mp_mmul(fb, mGp, p, p0i);
-                    Gt[kt + 2 * j + 1] = mp_mmul(fa, mGp, p, p0i);
                 }
                 mp_iNTT(logn, &mut Ft[kt..(kt + n)], igm, p, p0i);
-                mp_iNTT(logn, &mut Gt[kt..(kt + n)], igm, p, p0i);
             }
 
             if (i + 1) == slen {
@@ -324,62 +300,73 @@ fn solve_NTRU_intermediate(logn_top: u32,
             }
         }
 
-        // (Ft, Gt) are in RNS, we want them in plain representation.
-        zint_rebuild_CRT(FGt, llen, n, 2, true, work);
+        // Edge case: if slen == llen, then we have not rebuilt f
+        // into plain representation yet, so we do it now.
+        if slen == llen {
+            let (ft, _) = fgt.split_at_mut(slen * n);
+            zint_rebuild_CRT(ft, slen, n, 1, true, work);
+        }
+
+        // Ft is in RNS, we want it in plain representation.
+        zint_rebuild_CRT(Ft, llen, n, 1, true, work);
     }
 
-    // Current memory lauout:
+    // Current memory layout:
     //   Ft   F from this level (unreduced) (llen * n) (plain)
-    //   Gt   G from this level (unreduced) (llen * n) (plain)
     //   ft   f from this level (slen * n) (plain)
-    //   gt   g from this level (slen * n) (plain)
 
-    // We now reduce these (F,G) with Babai's nearest plane algorithm.
-    // The reduction conceptually goes as follows:
+    // We now reduce these F with Babai's nearest plane algorithm.
+    // algorithm. The reduction conceptually goes as follows:
     //   k <- round((F*adj(f) + G*adj(g))/(f*adj(f) + g*adj(g)))
     //   (F, G) <- (F - k*f, G - k*g)
-    // We use fixed-point approximations of (f,g) and (F, G) to get
-    // a value k as a small polynomial with scaling; we then apply
-    // k on the full-width polynomial. Each iteration "shaves" a
-    // a few bits off F and G.
+    // We only have F; however, G is such that:
+    //   f*G - g*F = q
+    // hence:
+    //   G = (q + g*F)/f
+    // which we can move into the expression of k, which simplifies into:
+    //   k = round(F/f + q*adj(g)/(f*(f*adj(f) + g*adj(g))))
+    // The second part only depends on f and g; moreover, it is
+    // heuristically negligible, i.e. we can compute an approximate
+    // value of k as:
+    //   k = round(F/f)
+    // In practice, this approximation is good enough for our purposes,
+    // which is to let the algorithm keep going (at the end, a less
+    // approximate k is used to finish up the values).
     //
-    // We apply the process sufficiently many times to reduce (F, G)
-    // to the size of (f, g) with a reasonable probability of success.
+    // We use fixed-point approximations of f and F to get a value k
+    // as a small polynomial with scaling; we then apply k on the
+    // full-width polynomial. Each iteration "shaves" a few bits off F.
+    //
+    // We apply the process sufficiently many times to reduce F
+    // to the size of f with a reasonable probability of success.
     // Since we want full constant-time processing, the number of
     // iterations and the accessed slots work on some assumptions on
     // the sizes of values (sizes have been measured over many samples,
     // and a margin of 5 times the standard deviation).
 
     // If depth is at least 2, and we will use the NTT to subtract
-    // (k*f,k*g) from (F,G), then we will need to convert (f,g) to
-    // NTT over slen+1 words, which requires an extra word to ft and gt.
+    // k*f from F, then we will need to convert f to NTT over slen+1
+    // words, which requires an extra word to ft.
     let use_sub_ntt = depth > 1 && logn >= MIN_LOGN_FGNTT;
-    if use_sub_ntt {
-        tmp_u32[..].copy_within(
-            (2 * llen * n + slen * n)..(2 * llen * n + 2 * slen * n),
-            2 * llen * n + (slen + 1) * n);
-    }
     let slen_adj = if use_sub_ntt { slen + 1 } else { slen };
 
     // Current memory layout:
     //   Ft    F from this level (unreduced) (llen * n) (plain)
-    //   Gt    G from this level (unreduced) (llen * n) (plain)
-    //   ft    f from this level (slen * n, +n if use_sub_ntt) (plain)
-    //   gt    g from this level (slen * n, +n if use_sub_ntt) (plain)
+    //   ft    f from this level (slen_adj * n) (plain)
 
     // For the reduction, we will consider only the top rlen words
-    // of (f,g).
+    // of f.
     let rlen = WORD_WIN[depth as usize];
     let blen = slen - rlen;
 
-    // We are going to convert f and g into fixed-point approximations,
-    // in rt3 and rt4, respectively. The values will be scaled down by
-    // 2^(scale_fg + scale_x). scale_fg is a public value, but scale_x
-    // is set according to the current values of f and g, and therefore
-    // it is secret. scale_x is set such that the largest coefficient
-    // is close to, but lower than, some limit t (in absolute value).
-    // The limit t is chosen so that f*adj(f) + g*adj(g) does not
-    // overflow, i.e. all coefficients must remain below 2^31.
+    // We are going to convert f into fixed-point approximations (into
+    // rt3). The values will be scaled down by 2^(scale_fg + scale_x).
+    // scale_fg is a public value, but scale_x is set according to the
+    // current values of f, and therefore it is secret. scale_x is set
+    // such that the largest coefficient is close to, but lower than,
+    // some limit t (in absolute value). The limit t is chosen so that
+    // f*adj(f) does not overflow, i.e. all coefficients must remain
+    // below 2^31.
     //
     // Let n be the degree (n <= 2^10). The squared norm of a polynomial
     // is the sum of the squared norms of the coefficients, with the
@@ -396,33 +383,28 @@ fn solve_NTRU_intermediate(logn_top: u32,
     // coefficient with its conjugate; thus, the coefficients of
     // f*adj(f), in FFT representation, are at most n^2*t^2.
     //
-    // Since we want the coefficients of f*adj(f) + g*adj(g) not to
-    // exceed 2^31, we need n^2*t^2 <= 2^30, i.e. n*t <= 2^15. We can
-    // adjust t accordingly (called scale_t in the code below). We also
-    // need to take care that t must not exceed scale_x. Approximation
-    // of f and g are extracted with scale scale_fg + scale_x - scale_t,
-    // and later fixed by dividing them by 2^scale_t.
+    // Since we want the coefficients of f*adj(f) not to exceed 2^31, we
+    // need n^2*t^2 <= 2^30, i.e. n*t <= 2^15.5. We can adjust t
+    // accordingly (called scale_t in the code below). We also need to
+    // take care that t must not exceed scale_x. Approximation of f is
+    // extracted with scale scale_fg + scale_x - scale_t, and later
+    // fixed by dividing them by 2^scale_t.
     let scale_fg = 31 * (blen as u32);
     let mut scale_FG = 31 * (llen as u32);
     let scale_x;
 
     {
-        let (_, work) = tmp_u32.split_at_mut(2 * n * llen);
-        let (ft, gt) = work.split_at_mut(n * slen_adj);
+        let (_, work) = tmp_u32.split_at_mut(n * llen);
+        let (ft, _) = work.split_at_mut(n * slen_adj);
 
         // FXR values:
         //   rt3   n
-        //   rt4   n
         //   rt1   n/2
-        // TODO: share (rt3,rt4,rt1) with space just after gt
-        let (rt3, rttmp) = tmp_fxr.split_at_mut(n);
-        let (rt4, rt1) = rttmp.split_at_mut(n);
+        // TODO: share (rt3,rt1) with space just after ft
+        let (rt3, _) = tmp_fxr.split_at_mut(n);
 
         // scale_x is the maximum bit length of f and g (beyond scale_fg)
-        let scale_xf = poly_max_bitlength(logn, &ft[(n * blen)..], rlen);
-        let scale_xg = poly_max_bitlength(logn, &gt[(n * blen)..], rlen);
-        scale_x = scale_xf
-            ^ ((scale_xf ^ scale_xg) & tbmask(scale_xf.wrapping_sub(scale_xg)));
+        scale_x = poly_max_bitlength(logn, &ft[(n * blen)..], rlen);
 
         // scale_t is from logn, but not greater than scale_x
         let scale_t = 15 - logn;
@@ -430,61 +412,37 @@ fn solve_NTRU_intermediate(logn_top: u32,
             ^ ((scale_t ^ scale_x) & tbmask(scale_x.wrapping_sub(scale_t)));
         let scdiff = scale_x - scale_t;
 
-        // Extract the approximations of f and g (scaled).
+        // Extract the approximation of f (scaled).
         poly_big_to_fixed(logn, &ft[(n * blen)..], rlen, scdiff, rt3);
-        poly_big_to_fixed(logn, &gt[(n * blen)..], rlen, scdiff, rt4);
 
-        // Compute adj(f)/(f*adj(f) + g*adj(g)) into rt3 (FFT).
-        // Compute adj(g)/(f*adj(f) + g*adj(g)) into rt4 (FFT).
+        // Compute adj(f)/(f*adj(f)) into rt3 (FFT).
         vect_FFT(logn, rt3);
-        vect_FFT(logn, rt4);
-        vect_norm_fft(logn, rt1, rt3, rt4);
-        vect_mul2e(logn, rt3, scale_t);
-        vect_mul2e(logn, rt4, scale_t);
-        for i in 0..hn {
-            // Note: four independent divisions; we do not mutualize the
-            // inversion of rt1[i] since that would lose too much precision.
-            rt3[i] /= rt1[i];
-            rt3[i + hn] = (-rt3[i + hn]) / rt1[i];
-            rt4[i] /= rt1[i];
-            rt4[i + hn] = (-rt4[i + hn]) / rt1[i];
-        }
+        vect_inv_mul2e_fft(logn, rt3, scale_t);
     }
 
     // New layout:
     //   Ft    F from this level (unreduced) (llen * n)
-    //   Gt    G from this level (unreduced) (llen * n)
     //   ft    f from this level (slen_adj * n)
-    //   gt    g from this level (slen_adj * n)
     //   k     n
     //   t2    3*n
     //
     //   rt3   n (FXR)
-    //   rt4   n (FXR)
     //   rt1   n (FXR)
-    //   rt2   n (FXR)
     //
     // TODO: merge the FXR space with the u32 space:
-    //   rt3 starts right after gt
-    //   k,t2 can share the same space as rt1,rt2
-    //   at depth 1 we should also remove ft and gt
+    //   rt3 starts right after ft
+    //   k,t2 can share the same space as rt1
     {
         let (Ft, work) = tmp_u32.split_at_mut(llen * n);
-        let (Gt, work) = work.split_at_mut(llen * n);
-        let fgt_size = if depth == 1 { 0 } else { 2 * slen_adj * n };
-        let (fgt, work) = work.split_at_mut(fgt_size);
+        let (ft, work) = work.split_at_mut(slen_adj * n);
         let (k, t2) = work.split_at_mut(n);
 
         let (rt3, work) = tmp_fxr.split_at_mut(n);
-        let (rt4, work) = work.split_at_mut(n);
-        let (rt1, work) = work.split_at_mut(n);
-        let (rt2, _) = work.split_at_mut(n);
+        let (rt1, _) = work.split_at_mut(n);
 
-        // Ft, Gt, ft, gt, rt3 and rt4 are already set.
-        // If we use poly_sub_scaled_ntt(), then we convert f and g to
-        // NTT.
+        // Ft, ft and rt3 are already set.
+        // If we use poly_sub_scaled_ntt(), then we convert f to NTT.
         if use_sub_ntt {
-            let (ft, gt) = fgt.split_at_mut(slen_adj * n);
             let (gm, tn) = t2.split_at_mut(n);
             for i in 0..slen_adj {
                 let p = PRIMES[i].p;
@@ -499,65 +457,43 @@ fn solve_NTRU_intermediate(logn_top: u32,
                 mp_NTT(logn, &mut tn[(i << logn)..], gm, p, p0i);
             }
             ft.copy_from_slice(&tn[..(slen_adj * n)]);
-            for i in 0..slen_adj {
-                let p = PRIMES[i].p;
-                let p0i = PRIMES[i].p0i;
-                let R2 = PRIMES[i].R2;
-                let Rx = mp_Rx31(slen as u32, p, p0i, R2);
-                mp_mkgm(logn, PRIMES[i].g, p, p0i, gm);
-                for j in 0..n {
-                    tn[(i << logn) + j] = zint_mod_small_signed(
-                        &gt[j..], slen, n, p, p0i, R2, Rx);
-                }
-                mp_NTT(logn, &mut tn[(i << logn)..], gm, p, p0i);
-            }
-            gt.copy_from_slice(&tn[..(slen_adj * n)]);
         }
 
-        // Reduce F and G repeatedly.
+        // Reduce F repeatedly.
         // Each iteration is expected to reduce the size of the coefficients
         // by reduce_bits.
         let mut FGlen = llen;
         let reduce_bits = REDUCE_BITS[logn_top as usize];
         loop {
-            // Convert F and G into fixed-point. We want to apply scaling
+            // Convert F into fixed-point. We want to apply scaling
             // scale_FG + scale_x.
             let (sch, coff) = divrem31(scale_FG);
             let clen = sch as usize;
             poly_big_to_fixed(logn,
                 &Ft[(clen * n)..], FGlen - clen, scale_x + coff, rt1);
-            poly_big_to_fixed(logn,
-                &Gt[(clen * n)..], FGlen - clen, scale_x + coff, rt2);
 
-            // rt2 <- (F*adj(f) + G*adj(g)) / (f*adj(f) + g*adj(g))
+            // rt1 <- (F*adj(f)) / (f*adj(f))
             vect_FFT(logn, rt1);
-            vect_FFT(logn, rt2);
             vect_mul_fft(logn, rt1, rt3);
-            vect_mul_fft(logn, rt2, rt4);
-            vect_add(logn, rt2, rt1);
-            vect_iFFT(logn, rt2);
+            vect_iFFT(logn, rt1);
 
-            // k <- round(rt2)  (i32 elements, stored in u32 slice)
+            // k <- round(rt1)  (i32 elements, stored in u32 slice)
             for i in 0..n {
-                k[i] = rt2[i].round() as u32;
+                k[i] = rt1[i].round() as u32;
             }
 
-            // (f,g) are scaled by scale_fg + scale_x
-            // (F,G) are scaled by scale_FG + scale_x
+            // f is scaled by scale_fg + scale_x
+            // F is scaled by scale_FG + scale_x
             // Thus, k is scaled by scale_FG - scale_fg, which is public.
             let scale_k = scale_FG - scale_fg;
 
             if depth == 1 {
-                poly_sub_kfg_scaled_depth1(logn_top,
-                    Ft, Gt, FGlen, k, scale_k, f, g, t2);
+                poly_sub_kf_scaled_depth1(logn_top,
+                    Ft, FGlen, k, scale_k, f, t2);
             } else if use_sub_ntt {
-                let (ft, gt) = fgt.split_at_mut(slen_adj * n);
                 poly_sub_scaled_ntt(logn, Ft, FGlen, ft, slen, k, scale_k, t2);
-                poly_sub_scaled_ntt(logn, Gt, FGlen, gt, slen, k, scale_k, t2);
             } else {
-                let (ft, gt) = fgt.split_at_mut(slen_adj * n);
                 poly_sub_scaled(logn, Ft, FGlen, ft, slen, k, scale_k);
-                poly_sub_scaled(logn, Gt, FGlen, gt, slen, k, scale_k);
             }
 
             // We now assume that F and G have shrunk by at least
@@ -573,97 +509,24 @@ fn solve_NTRU_intermediate(logn_top: u32,
             while FGlen > slen
                 && 31 * ((FGlen - slen) as u32) > scale_FG - scale_fg + 30
             {
+                // We decrement FGlen; when we do so, we check that it
+                // does not damage any of the values, i.e. that the removed
+                // words are redundant with the remaining words. In practice,
+                // this test reliably catches reduction failures early enough.
                 FGlen -= 1;
+                let off = (FGlen - 1) << logn;
+                for i in 0..n {
+                    let sw = (Ft[off + i] >> 30).wrapping_neg() >> 1;
+                    if Ft[off + i + n] != sw {
+                        return false;
+                    }
+                }
             }
         }
     }
 
-    // Output F is already in the right place; G must be moved.
-    tmp_u32.copy_within((llen * n)..((llen + slen) * n), slen * n);
-
-    // Reduction is done. We test the current solution modulo a single
-    // prime.
-    // Exception: this is not done if depth == 1 (the reference C code
-    // did not keep (ft,gt) in that case). In any case, the depth-0
-    // test will cover it.
-    // If use_sub_ntt is true, then ft and gt are already in NTT
-    // representation.
-    if depth == 1 {
-        return true;
-    }
-
-    // Move (ft,gt) right after the reduced G.
-    // If use_sub_ntt is false, then slen_adj == slen.
-    // If use_sub_ntt is true, then slen_adj == slen + 1, but (ft,gt) are
-    // already in NTT representation and we only need the first coefficient.
-    if use_sub_ntt {
-        // ft mod p0 (NTT)
-        tmp_u32.copy_within(
-            ((2 * llen) * n)..((2 * llen + 1) * n),
-            2 * slen * n);
-        // gt mod p0 (NTT)
-        tmp_u32.copy_within(
-            ((2 * llen + slen_adj) * n)..((2 * llen + slen_adj + 1) * n),
-            (2 * slen + slen) * n);
-    } else {
-        tmp_u32.copy_within(
-            (2 * llen * n)..(2 * (llen + slen) * n), 2 * slen * n);
-    }
-
-    {
-        let (Ft, work) = tmp_u32.split_at_mut(slen * n);
-        let (Gt, work) = work.split_at_mut(slen * n);
-        let (ft, work) = work.split_at_mut(slen * n);
-        let (gt, work) = work.split_at_mut(slen * n);
-        let (t1, work) = work.split_at_mut(slen * n);
-        let (t2, gm) = work.split_at_mut(slen * n);
-
-        let p = P0.p;
-        let p0i = P0.p0i;
-        let R2 = P0.R2;
-        let Rx = mp_Rx31(slen as u32, p, p0i, R2);
-        mp_mkgm(logn, P0.g, p, p0i, gm);
-
-        // ft <- NTT(f)
-        // gt <- NTT(g)
-        // This is already done if use_sub_ntt is true
-        if !use_sub_ntt {
-            for i in 0..n {
-                ft[i] = zint_mod_small_signed(
-                    &ft[i..], slen, n, p, p0i, R2, Rx);
-                gt[i] = zint_mod_small_signed(
-                    &gt[i..], slen, n, p, p0i, R2, Rx);
-            }
-            mp_NTT(logn, ft, gm, p, p0i);
-            mp_NTT(logn, gt, gm, p, p0i);
-        }
-
-        // t1 <- NTT(F)
-        // t2 <- NTT(G)
-        for i in 0..n {
-            t1[i] = zint_mod_small_signed(&Ft[i..], slen, n, p, p0i, R2, Rx);
-            t2[i] = zint_mod_small_signed(&Gt[i..], slen, n, p, p0i, R2, Rx);
-        }
-        mp_NTT(logn, t1, gm, p, p0i);
-        mp_NTT(logn, t2, gm, p, p0i);
-
-        // Compute f*G - g*F, in NTT representation. If the solution is
-        // correct, then this should yield the constant polynomial q,
-        // whose NTT coefficients are all equal to q. Since we are
-        // going to use Montgomery multiplications, we need to compare
-        // the results with q/R mod p_0.
-        let rv = mp_mmul(Q, 1, p, p0i);
-        for i in 0..n {
-            let x = mp_mmul(ft[i], t2[i], p, p0i);
-            let y = mp_mmul(gt[i], t1[i], p, p0i);
-            if rv != mp_sub(x, y, p) {
-                return false;
-            }
-        }
-
-    }
-
-    return true;
+    // Output F is already in the right place.
+    true
 }
 
 // Solving the NTRU equation, top-level.
@@ -673,7 +536,7 @@ fn solve_NTRU_depth0(logn: u32,
     let n = 1usize << logn;
     let hn = n >> 1;
 
-    // Normally, (F,G) from depth 1 should use one word per coefficient.
+    // Normally, F from depth 1 should use one word per coefficient.
     // The code in this function assumes it.
     assert!(MOD_SMALL_BL[1] == 1);
 
@@ -683,187 +546,188 @@ fn solve_NTRU_depth0(logn: u32,
     let p0i = P0.p0i;
     let R2 = P0.R2;
 
-    {
-        // Layout:
-        //   Fd   F from upper level (hn)
-        //   Gd   G from upper level (hn)
-        //   ft   f (n)
-        //   gt   g (n)
-        //   gm   helper for NTT
-        let (Fd, work) = tmp_u32.split_at_mut(hn);
-        let (Gd, work) = work.split_at_mut(hn);
-        let (ft, work) = work.split_at_mut(n);
-        let (gt, work) = work.split_at_mut(n);
-        let (gm, _) = work.split_at_mut(n);
+    // Split work area into five n-slot buffers.
+    // Fd (from depth 1) is in the first hn slots of t1.
+    let (t1, work) = tmp_u32.split_at_mut(n);
+    let (t2, work) = work.split_at_mut(n);
+    let (t3, work) = work.split_at_mut(n);
+    let (t4, work) = work.split_at_mut(n);
+    let (t5, _) = work.split_at_mut(n);
 
-        // Load f and g, convert to RNS+NTT
-        mp_mkgm(logn, P0.g, p, p0i, gm);
-        poly_mp_set_small(logn, f, p, ft);
-        poly_mp_set_small(logn, g, p, gt);
-        mp_NTT(logn, ft, gm, p, p0i);
-        mp_NTT(logn, gt, gm, p, p0i);
+    // Convert Fd to RNS+NTT, into t3.
+    mp_mkgm(logn, P0.g, p, p0i, t4);
+    poly_mp_set(logn - 1, t1, p);
+    mp_NTT(logn - 1, t1, t4, p, p0i);
+    t3[..hn].copy_from_slice(&t1[..hn]);
 
-        // Convert Fd and Gd to RNS+NTT
-        poly_mp_set(logn - 1, Fd, p);
-        poly_mp_set(logn - 1, Gd, p);
-        mp_NTT(logn - 1, Fd, gm, p, p0i);
-        mp_NTT(logn - 1, Gd, gm, p, p0i);
+    // Compute F (unreduced, RNS+NTT) into t1.
+    poly_mp_set_small(logn, g, p, t2);
+    mp_NTT(logn, t2, t4, p, p0i);
+    for i in 0..hn {
+        let ga = t2[(i << 1) + 0];
+        let gb = t2[(i << 1) + 1];
+        let mF = mp_mmul(t3[i], R2, p, p0i);
+        t1[(i << 1) + 0] = mp_mmul(gb, mF, p, p0i);
+        t1[(i << 1) + 1] = mp_mmul(ga, mF, p, p0i);
+    }
 
-        // Build the unreduced (F,G) into ft and gt
-        for i in 0..hn {
-            let fa = ft[(i << 1) + 0];
-            let fb = ft[(i << 1) + 1];
-            let ga = gt[(i << 1) + 0];
-            let gb = gt[(i << 1) + 1];
-            let mFd = mp_mmul(Fd[i], R2, p, p0i);
-            let mGd = mp_mmul(Gd[i], R2, p, p0i);
-            ft[(i << 1) + 0] = mp_mmul(gb, mFd, p, p0i);
-            ft[(i << 1) + 1] = mp_mmul(ga, mFd, p, p0i);
-            gt[(i << 1) + 0] = mp_mmul(fb, mGd, p, p0i);
-            gt[(i << 1) + 1] = mp_mmul(fa, mGd, p, p0i);
+    // Layout:
+    //   t1   F (unreduced, RNS+NTT)
+    //   t2   g (RNS+NTT)
+    //   t3   free
+    //   t4   gm (NTT support)
+    //   t5   free
+
+    // Load f and convert to RNS+NTT (into t3). Since we are about to
+    // divide by f modulo p, we also need to check that f is invertible
+    // modulo p (which should almost always be the case in practice).
+    poly_mp_set_small(logn, f, p, t3);
+    mp_NTT(logn, t3, t4, p, p0i);
+    for i in 0..n {
+        if t3[i] == 0 {
+            return false;
         }
     }
 
-    // Reorganize buffers:
-    //   Fp   unreduced F (n) (RNS+NTT)
-    //   Gp   unreduced G (n) (RNS+NTT)
-    //   t1   free (n)
-    //   t2   NTT support (gm) (n)
-    //   t3   free (n)
-    //   t4   free (n)
-    tmp_u32.copy_within(n..(3 * n), 0);
+    // Layout:
+    //   t1   F (unreduced, RNS+NTT)
+    //   t2   g (RNS+NTT)
+    //   t3   f (RNS+NTT)
+    //   t4   free
+    //   t5   free
 
-    {
-        let (Fp, work) = tmp_u32.split_at_mut(n);
-        let (Gp, work) = work.split_at_mut(n);
-        let (t1, work) = work.split_at_mut(n);
-        let (t2, work) = work.split_at_mut(n);
-        let (t3, t4) = work.split_at_mut(n);
-
-        // t4 <- f (RNS+NTT)
-        poly_mp_set_small(logn, f, p, t4);
-        mp_NTT(logn, t4, t2, p, p0i);
-
-        // t1 <- F*adj(f) (RNS+NTT)
-        // t3 <- f*adj(f) (RNS+NTT)
-        for i in 0..n {
-            let w = mp_mmul(t4[(n - 1) - i], R2, p, p0i);
-            t1[i] = mp_mmul(w, Fp[i], p, p0i);
-            t3[i] = mp_mmul(w, t4[i], p, p0i);
-        }
-
-        // t4 <- g (RNS+NTT)
-        poly_mp_set_small(logn, g, p, t4);
-        mp_NTT(logn, t4, t2, p, p0i);
-
-        // t1 <- t1 + G*adj(g) (RNS+NTT)
-        // t3 <- t3 + g*adj(g) (RNS+NTT)
-        for i in 0..n {
-            let w = mp_mmul(t4[(n - 1) - i], R2, p, p0i);
-            t1[i] = mp_add(t1[i], mp_mmul(w, Gp[i], p, p0i), p);
-            t3[i] = mp_add(t3[i], mp_mmul(w, t4[i], p, p0i), p);
-        }
-
-        // Convert back F*adj(f) + G*adj(g) and f*adj(f) + g*adj(g) to
-        // plain representation, and also move f*adj(f) + g*adj(g) to t2.
-        mp_mkigm(logn, P0.ig, p, p0i, t4);
-        mp_iNTT(logn, t1, t4, p, p0i);
-        mp_iNTT(logn, t3, t4, p, p0i);
-        for i in 0..n {
-            // Note: we do not truncate to 31 bits.
-            t1[i] = mp_norm(t1[i], p) as u32;
-            t2[i] = mp_norm(t3[i], p) as u32;
-        }
+    // We want to perform the reduction. Since this is the last one,
+    // we want to be precise, i.e. to use the full expression for k:
+    //
+    //   k = round((F*adj(f) + G*adj(g))/(f*adj(f) + g*adj(g)))
+    //
+    // We do not have G but we know that G = (q + g*F)/f, which we
+    // can compute modulo p (the division by f is exact over the
+    // integers, hence computing it modulo p yields the correct result,
+    // as long as the coefficients of G are in [-p/2,+p/2], which is
+    // heuristically the case). We accumulate the numerator and
+    // denominator into t2 and t3, respectively.
+    for i in 0..hn {
+        let tf0 = t3[i];
+        let tf1 = t3[n - 1 - i];
+        let tg0 = t2[i];
+        let tg1 = t2[n - 1 - i];
+        let tF0 = t1[i];
+        let tF1 = t1[n - 1 - i];
+        let mf0 = mp_mmul(tf0, R2, p, p0i);
+        let mf1 = mp_mmul(tf1, R2, p, p0i);
+        let mg0 = mp_mmul(tg0, R2, p, p0i);
+        let mg1 = mp_mmul(tg1, R2, p, p0i);
+        let tG0 = mp_div(mp_add(Q, mp_mmul(mg0, tF0, p, p0i), p), tf0, p);
+        let tG1 = mp_div(mp_add(Q, mp_mmul(mg1, tF1, p, p0i), p), tf1, p);
+        let kn0 = mp_add(
+            mp_mmul(mf1, tF0, p, p0i),
+            mp_mmul(mg1, tG0, p, p0i), p);
+        let kn1 = mp_add(
+            mp_mmul(mf0, tF1, p, p0i),
+            mp_mmul(mg0, tG1, p, p0i), p);
+        let kd = mp_add(
+            mp_mmul(mf0, tf1, p, p0i),
+            mp_mmul(mg0, tg1, p, p0i), p);
+        t2[i] = kn0;
+        t2[n - 1 - i] = kn1;
+        t3[i] = kd;
+        t3[n - 1 - i] = kd;
     }
 
-    // Current layout:
-    //   Fp   unreduced F (RNS+NTT) (n)
-    //   Gp   unreduced G (RNS+NTT) (n)
-    //   t1   F*adj(f) + G*adj(g) (plain, 32-bit) (n)
-    //   t2   f*adj(f) + g*adj(g) (plain, 32-bit) (n)
+    // Layout:
+    //   t1   F (unreduced, RNS+NTT)
+    //   t2   F*adj(f) + G*adj(g) (RNS+NTT)
+    //   t3   f*adj(f) + g*adj(g) (RNS+NTT)
+    //   t4   free
+    //   t5   free
 
-    // We need to divide t1 by t2, and round the result. We convert
+    // Convert back numerator and denominator to plain integers.
+    mp_mkigm(logn, PRIMES[0].ig, p, p0i, t4);
+    mp_iNTT(logn, t2, t4, p, p0i);
+    mp_iNTT(logn, t3, t4, p, p0i);
+    for i in 0..n {
+        // NOTE: no truncature to 31 bits.
+        t2[i] = mp_norm(t2[i], p) as u32;
+        t3[i] = mp_norm(t3[i], p) as u32;
+    }
+
+    let SCALE = 32 - 10;
+    // We need to divide t2 by t3, and round the result. We convert
     // them to FFT representation, downscaled by 2^10 (to avoid overflows).
     // We first convert f*adj(f) + g*adj(g), which is self-adjoint;
-    // this, its FFT representation only has half-size.
-    {
-        let (_, work) = tmp_u32.split_at_mut(n);
-        let (_, work) = work.split_at_mut(n);
-        let (t1, t2) = work.split_at_mut(n);
-        let (rt2, rt3) = tmp_fxr.split_at_mut(hn);
-
-        // rt2 <- f*adj(f) + g*adj(g) (FFT, self-adjoint, scaled)
-        for i in 0..n {
-            let x = ((t2[i] as i32) as i64) << 22;
-            rt3[i] = FXR::from_u64_scaled32(x as u64);
-        }
-        vect_FFT(logn, rt3);
-        rt2.copy_from_slice(&rt3[..hn]);
-
-        // rt3 <- F*adj(f) + G*adj(g) (FFT, scaled)
-        for i in 0..n {
-            let x = ((t1[i] as i32) as i64) << 22;
-            rt3[i] = FXR::from_u64_scaled32(x as u64);
-        }
-        vect_FFT(logn, rt3);
-
-        // Divide F*adj(f) + G*adj(g) by f*adj(f) + g*adj(g), and round
-        // the result into t1, with conversion to RNS.
-        vect_div_selfadj_fft(logn, rt3, rt2);
-        vect_iFFT(logn, rt3);
-        for i in 0..n {
-            t1[i] = mp_set(rt3[i].round(), p);
-        }
+    // thus, its FFT representation only has half-size. */
+    for i in 0..n {
+        let x = ((t3[i] as i32) as i64) << SCALE;
+        tmp_fxr[i] = FXR::from_u64_scaled32(x as u64);
+    }
+    vect_FFT(logn, tmp_fxr);
+    let (rt5, rt3) = tmp_fxr.split_at_mut(hn);
+    for i in 0..n {
+        let x = ((t2[i] as i32) as i64) << SCALE;
+        rt3[i] = FXR::from_u64_scaled32(x as u64);
+    }
+    vect_FFT(logn, rt3);
+    // rt5   f*adj(f) + g*adj(g)   (FFT, half-size)
+    // rt3   F*adj(f) + G*adj(g)   (FFT, half-size)
+    vect_div_selfadj_fft(logn, rt3, rt5);
+    vect_iFFT(logn, rt3);
+    for i in 0..n {
+        t2[i] = mp_set(rt3[i].round(), p);
     }
 
-    // Current layout:
-    //   Fp   unreduced F (RNS+NTT) (n)
-    //   Gp   unreduced G (RNS+NTT) (n)
-    //   t1   k (RNS) (n)
-    //   t2   free (n)
-    //   t3   free (n)
-    //   t4   free (n)
+    // Layout:
+    //   t1   F (unreduced, RNS+NTT)
+    //   t2   k (RNS)
+    //   t3   free
+    //   t4   free
+    //   t5   free
 
-    {
-        let (Fp, work) = tmp_u32.split_at_mut(n);
-        let (Gp, work) = work.split_at_mut(n);
-        let (t1, work) = work.split_at_mut(n);
-        let (t2, work) = work.split_at_mut(n);
-        let (t3, t4) = work.split_at_mut(n);
+    // Get back f and g, convert all polynomials to RNS+NTT.
+    mp_mkgm(logn, PRIMES[0].g, p, p0i, t5);
+    poly_mp_set_small(logn, f, p, t3);
+    poly_mp_set_small(logn, g, p, t4);
+    mp_NTT(logn, t2, t5, p, p0i);
+    mp_NTT(logn, t3, t5, p, p0i);
+    mp_NTT(logn, t4, t5, p, p0i);
 
-        // Convert k to RNS+NTT.
-        mp_mkgm(logn, P0.g, p, p0i, t4);
-        mp_NTT(logn, t1, t4, p, p0i);
+    // Layout:
+    //   t1   F (unreduced, RNS+NTT)
+    //   t2   k (RNS+NTT)
+    //   t3   f (RNS+NTT)
+    //   t4   g (RNS+NTT)
+    //   t5   free
 
-        // Subtract k*f from F and k*G from G.
-        // We also compute f*G - g*F (in RNS+NTT) to check that the solution
-        // is correct.
-        poly_mp_set_small(logn, f, p, t2);
-        poly_mp_set_small(logn, g, p, t3);
-        mp_NTT(logn, t2, t4, p, p0i);
-        mp_NTT(logn, t3, t4, p, p0i);
-        let rv = mp_mmul(Q, 1, p, p0i);
-        for i in 0..n {
-            let kv = mp_mmul(t1[i], R2, p, p0i);
-            Fp[i] = mp_sub(Fp[i], mp_mmul(kv, t2[i], p, p0i), p);
-            Gp[i] = mp_sub(Gp[i], mp_mmul(kv, t3[i], p, p0i), p);
-            let x = mp_sub(
-                mp_mmul(t2[i], Gp[i], p, p0i),
-                mp_mmul(t3[i], Fp[i], p, p0i), p);
-            if x != rv {
-                return false;
-            }
-        }
-
-        // Convert back F and G into normal representation.
-        mp_mkigm(logn, P0.ig, p, p0i, t4);
-        mp_iNTT(logn, Fp, t4, p, p0i);
-        mp_iNTT(logn, Gp, t4, p, p0i);
-        poly_mp_norm(logn, Fp, p);
-        poly_mp_norm(logn, Gp, p);
+    // Reduce F by subtracting k*F, and recompute the corresponding G
+    // with:
+    //   G = (q + g*F)/f
+    // (We did not keep the unreduced G, in order to save RAM.) */
+    for i in 0..n {
+        let tF = t1[i];
+        let tk = t2[i];
+        let tf = t3[i];
+        let tg = t4[i];
+        let mf = mp_mmul(tf, R2, p, p0i);
+        let mg = mp_mmul(tg, R2, p, p0i);
+        let tF = mp_sub(tF, mp_mmul(mf, tk, p, p0i), p);
+        let tG = mp_div(mp_add(Q, mp_mmul(mg, tF, p, p0i), p), tf, p);
+        t1[i] = tF;
+        t2[i] = tG;
     }
 
-    return true;
+    // Convert back F and G into normal representation.
+    mp_mkigm(logn, PRIMES[0].ig, p, p0i, t3);
+    mp_iNTT(logn, t1, t3, p, p0i);
+    mp_iNTT(logn, t2, t3, p, p0i);
+    poly_mp_norm(logn, t1, p);
+    poly_mp_norm(logn, t2, p);
+
+    // By construction, f*G - g*F = q modulo p; if both F and G are in
+    // the correct range ([-127,+127]), then this equation will also
+    // hold over plain integers:
+    //   N_inf(f*G - g*F) <= (127^2)*n*2 < 2^25 < p/2
+    // Verifying that F and G are in range is done by the caller.
+    true
 }
 
 // Inject (f,g) at the top-level: f and g are converted to NTT and
@@ -986,19 +850,8 @@ fn make_fg_intermediate(logn_top: u32,
 // then this function returns false (but everything else is still
 // computed); otherwise, this function returns true. There is no such
 // test on g.
-fn make_fg_deepest(logn: u32, f: &[i8], g: &[i8], mut work: &mut [u32])
-    -> bool
-{
+fn make_fg_deepest(logn: u32, f: &[i8], g: &[i8], mut work: &mut [u32]) {
     make_fg_depth0(logn, f, g, work);
-
-    // f is now in RNS+NTT; we can test its invertibility by checking
-    // that all its NTT coefficients are non-zero.
-    let n = 1usize << logn;
-    let mut b = 0;
-    for i in 0..n {
-        b |= work[i].wrapping_sub(1);
-    }
-    let r = (b >> 31) == 0;
 
     // Compute all the reduced (f,g) values, saving the intermediate
     // values (except that the highest levels).
@@ -1013,6 +866,4 @@ fn make_fg_deepest(logn: u32, f: &[i8], g: &[i8], mut work: &mut [u32])
             work = &mut work[..sav_off];
         }
     }
-
-    r
 }

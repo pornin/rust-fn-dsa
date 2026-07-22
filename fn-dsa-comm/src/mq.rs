@@ -52,9 +52,9 @@ pub fn mqpoly_small_is_invertible(logn: u32,
 
 /// Compute `h = g/f mod X^n+1 mod q`.
 ///
-/// This function assumes that `f` is invertible. Output is in external
-/// representation (coefficients are in `[0,q-1]`).
-pub fn mqpoly_div_small(logn: u32,
+/// This function assumes that `f` is invertible. Output is in NTT/external
+/// representation (NTT is used but coefficients are in `[0,q-1]`).
+pub fn mqpoly_div_small_nttx(logn: u32,
     f: &[i8], g: &[i8], h: &mut [u16], tmp: &mut [u16])
 {
     let n = 1usize << logn;
@@ -65,7 +65,6 @@ pub fn mqpoly_div_small(logn: u32,
     for i in 0..n {
         h[i] = mq_div(h[i] as u32, tmp[i] as u32) as u16;
     }
-    mqpoly_NTT_to_int(logn, h);
     mqpoly_int_to_ext(logn, h);
 }
 
@@ -83,6 +82,8 @@ pub const SQBETA: [u32; 11] = [
     34034726,
     70265242,
 ];
+
+use crate::codec::B_INF;
 
 const Q: u32 = 12289;
 
@@ -326,8 +327,9 @@ pub fn mqpoly_sub_int(logn: u32, a: &mut [u16], b: &[u16]) {
 /// of coefficients in `[-q/2,+q/2]`).
 ///
 /// The polynomial must be in external representation. If the squared norm
-/// exceeds `2^31-1` then `2^32-1` is returned.
-pub fn mqpoly_sqnorm(logn: u32, a: &[u16]) -> u32 {
+/// exceeds `2^31-1` then `2^32-1` is returned. If the L-infinity norm
+/// exceeds `B_INF` then `2^32-1` is returned.
+pub fn mqpoly_sqnorm_binf(logn: u32, a: &[u16]) -> u32 {
     let mut s = 0u32;
     let mut sat = 0;
     for i in 0..(1usize << logn) {
@@ -336,6 +338,9 @@ pub fn mqpoly_sqnorm(logn: u32, a: &[u16]) -> u32 {
         let y = x.wrapping_sub(m & Q) as i32;
         s = s.wrapping_add((y * y) as u32);
         sat |= s;
+        // Also check the L-infinity norm.
+        sat |= (B_INF - y) as u32;
+        sat |= (B_INF + y) as u32;
     }
     s | (sat >> 31).wrapping_neg()
 }

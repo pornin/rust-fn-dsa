@@ -47,10 +47,10 @@ pub unsafe fn mqpoly_small_is_invertible(logn: u32,
 
 /// Compute `h = g/f mod X^n+1 mod q`.
 ///
-/// This function assumes that `f` is invertible. Output is in external
-/// representation (coefficients are in `[0,q-1]`).
+/// This function assumes that `f` is invertible. Output is in NTT/external
+/// representation (NTT is used but coefficients are in `[0,q-1]`).
 #[target_feature(enable = "avx2")]
-pub unsafe fn mqpoly_div_small(logn: u32,
+pub unsafe fn mqpoly_div_small_nttx(logn: u32,
     f: &[i8], g: &[i8], h: &mut [u16], tmp: &mut [u16])
 {
     let n = 1usize << logn;
@@ -72,13 +72,14 @@ pub unsafe fn mqpoly_div_small(logn: u32,
             h[i] = mq_div(h[i] as u32, tmp[i] as u32) as u16;
         }
     }
-    mqpoly_NTT_to_int(logn, h);
     mqpoly_int_to_ext(logn, h);
 }
 
 // Maximum squared norm for "small" vectors (floor(beta^2)).
 // (re-exported from mq.rs)
 pub use super::mq::SQBETA;
+
+use crate::codec::B_INF;
 
 const Q: u32 = 12289;
 
@@ -771,21 +772,30 @@ pub unsafe fn mqpoly_sub_int(logn: u32, a: &mut [u16], b: &[u16]) {
 /// of coefficients in `[-q/2,+q/2]`).
 ///
 /// The polynomial must be in external representation. If the squared norm
-/// exceeds `2^31-1` then `2^32-1` is returned.
+/// exceeds `2^31-1` then `2^32-1` is returned. If the L-infinity norm
+/// exceeds `B_INF` then `2^32-1` is returned.
 #[target_feature(enable = "avx2")]
-pub unsafe fn mqpoly_sqnorm(logn: u32, a: &[u16]) -> u32 {
+pub unsafe fn mqpoly_sqnorm_binf(logn: u32, a: &[u16]) -> u32 {
     if logn >= 4 {
         let ap: *const __m256i = transmute(a.as_ptr());
         let mut ys = _mm256_setzero_si256();
         let mut ysat = _mm256_setzero_si256();
         let qq = _mm256_set1_epi16(Q as i16);
         let hq = _mm256_set1_epi16(((Q - 1) >> 1) as i16);
+        let bbp = _mm256_set1_epi16(B_INF as i16);
+        let bbm = _mm256_set1_epi16((-B_INF) as i16);
+        let mut ylif = _mm256_setzero_si256();
         for i in 0..(1usize << (logn - 4)) {
             let y = _mm256_loadu_si256(ap.wrapping_add(i));
 
             // Normalize to [-q/2,+q/2].
             let ym = _mm256_cmpgt_epi16(y, hq);
             let y = _mm256_sub_epi16(y, _mm256_and_si256(ym, qq));
+
+            // If the value is outside of [-B_INF,+B_INF],
+            // some nots of ylif will be set to 1.
+            ylif = _mm256_or_si256(ylif, _mm256_or_si256(
+                _mm256_cmpgt_epi16(y, bbp), _mm256_cmpgt_epi16(bbm, y)));
 
             // Compute and add coefficient squares.
             let ylo = _mm256_mullo_epi16(y, y);
@@ -802,8 +812,12 @@ pub unsafe fn mqpoly_sqnorm(logn: u32, a: &[u16]) -> u32 {
             ysat = _mm256_or_si256(ysat, ys);
         }
 
-        // Finish the addition.
-        // Saturate to 2^32-1 if any of the overflow bits was set.
+        // Merge the L-infinity failure bits into the overflow bits in ysat.
+        ylif = _mm256_or_si256(ylif, _mm256_slli_epi32(ylif, 16));
+        ysat = _mm256_or_si256(ysat, ylif);
+
+        // Finish the addition. We saturate to 2^32-1 if any of the
+        // overflow of L-infinity bits was set.
         ys = _mm256_add_epi32(ys, _mm256_srli_epi64(ys, 32));
         ysat = _mm256_or_si256(ysat, ys);
         ys = _mm256_add_epi32(ys, _mm256_bsrli_epi128(ys, 8));
@@ -824,6 +838,9 @@ pub unsafe fn mqpoly_sqnorm(logn: u32, a: &[u16]) -> u32 {
             let y = x.wrapping_sub(m & Q) as i32;
             s = s.wrapping_add((y * y) as u32);
             sat |= s;
+            // Also check the L-infinity norm.
+            sat |= (B_INF - y) as u32;
+            sat |= (B_INF + y) as u32;
         }
         return s | (sat >> 31).wrapping_neg();
     }
@@ -990,39 +1007,43 @@ mod tests {
         if crate::has_avx2() {
             unsafe {
                 // We generate random vectors with signed coefficients.
-                // We choose integers randomly in [0, 5039]; for a degree 256,
-                // this ensures that the squared norm will be above 2^31 about
-                // half of the time. The signs are also randomized.
-                let mut a = [0u16; 256];
+                // We choose integers randomly in [0, 840]; the squared
+                // norm cannot actually saturate. The signs are also
+                // randomized.
+                let mut a = [0u16; 1024];
                 let mut sh = crate::shake::SHAKE256::new();
                 sh.inject(&b"sqnorm_sat"[..]);
                 sh.flip();
-                for _ in 0..100 {
+                for j in 0..100 {
                     let mut rs = 0;
-                    for i in 0..256 {
+                    for i in 0..1024 {
                         // x <- absolute value of next coefficient.
                         let mut buf = [0u8; 4];
                         sh.extract(&mut buf);
-                        let x = u32::from_le_bytes(buf) % 5040;
-                        rs += (x * x) as u64;
+                        let x = i32::from_le_bytes(buf) % (B_INF + 1);
+                        rs += (x * x) as u32;
 
                         // v <- x with random sign and normalized in [1,q].
                         let v = if buf[3] >= 0x80 {
-                            Q - x
+                            (Q as i32) - x
                         } else if x == 0 {
-                            Q
+                            Q as i32
                         } else {
                             x
                         };
 
                         a[i] = v as u16;
                     }
-                    let s = mqpoly_sqnorm(8, &a);
-                    if rs > 0x7FFFFFFF {
-                        assert!(s == 0xFFFFFFFF);
-                    } else {
-                        assert!(s == (rs as u32));
-                    }
+                    let s = mqpoly_sqnorm_binf(10, &a);
+                    assert!(s == rs);
+                    a[j] = (B_INF + 1) as u16;
+                    assert!(mqpoly_sqnorm_binf(10, &a) == 0xFFFFFFFF);
+                    a[j] = ((Q as i32) - B_INF - 1) as u16;
+                    assert!(mqpoly_sqnorm_binf(10, &a) == 0xFFFFFFFF);
+                    a[j] = B_INF as u16;
+                    assert!(mqpoly_sqnorm_binf(8, &a) != 0xFFFFFFFF);
+                    a[j] = ((Q as i32) - B_INF) as u16;
+                    assert!(mqpoly_sqnorm_binf(8, &a) != 0xFFFFFFFF);
                 }
             }
         }

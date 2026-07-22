@@ -347,10 +347,10 @@ impl SubAssign<&FLR> for FLR {
 mod tests {
 
     use super::*;
-    use fn_dsa_comm::shake::SHAKE256;
-    use crate::tests::SHAKE256x4;
+    use fn_dsa_comm::PRNG;
+    use fn_dsa_comm::shake::{SHAKE256, SHAKE256_PRNG};
 
-    fn rand_u64(rng: &mut SHAKE256x4) -> u64 {
+    fn rand_u64(rng: &mut SHAKE256_PRNG) -> u64 {
         let mut x = 0;
         for _ in 0..4 {
             x = (x << 16) | (rng.next_u16() as u64);
@@ -358,7 +358,7 @@ mod tests {
         x
     }
 
-    fn rand_fp(rng: &mut SHAKE256x4) -> FLR {
+    fn rand_fp(rng: &mut SHAKE256_PRNG) -> FLR {
         // For tests, we randomize sign, mantissa and exponent, but we
         // force the exponent to be in [-80,+80] so that we do not get
         // overflows or underflows. We thus force the _encoded_ exponent
@@ -405,7 +405,7 @@ mod tests {
             }
         }
 
-        let mut rng = SHAKE256x4::new(&b"fpemu"[..]);
+        let mut rng = SHAKE256_PRNG::new(&b"fpemu"[..]);
         for ctr in 1..=65536 {
             let j = (rand_u64(&mut rng) as i64) >> (ctr & 63);
             assert!(j != -9223372036854775808);
@@ -459,7 +459,7 @@ mod tests {
         let mut buf = [0u8; 32];
         sh.flip();
         sh.extract(&mut buf);
-        assert!(buf[..] == hex::decode("54ada30bdb43e1f14465d944f2a665ca7eaa6e9678e9d035b0fcb8167efe9871").unwrap());
+        assert!(buf[..] == hex::decode("5948a632a0797439aa8e7ed9abc554512a9374812057684565f60e6a42702994").unwrap());
     }
 }
 
@@ -474,7 +474,7 @@ mod tests {
 mod tests_arch {
 
     use super::*;
-    use fn_dsa_comm::shake::SHAKE256x4;
+    use fn_dsa_comm::shake::SHAKE256_PRNG;
 
     fn f64_to_raw(x: f64) -> u64 {
         unsafe { core::mem::transmute(x) }
@@ -488,7 +488,7 @@ mod tests_arch {
         x.encode() == v.to_le_bytes()
     }
 
-    fn rand_u64(rng: &mut SHAKE256x4) -> u64 {
+    fn rand_u64(rng: &mut SHAKE256_PRNG) -> u64 {
         let mut x = 0;
         for _ in 0..4 {
             x = (x << 16) | (rng.next_u16() as u64);
@@ -496,7 +496,7 @@ mod tests_arch {
         x
     }
 
-    fn rand_fp(rng: &mut SHAKE256x4) -> FLR {
+    fn rand_fp(rng: &mut SHAKE256_PRNG) -> FLR {
         // For tests, we randomize sign, mantissa and exponent, but we
         // force the exponent to be in [-80,+80] so that we do not get
         // overflows or underflows. We thus force the _encoded_ exponent
@@ -544,7 +544,7 @@ mod tests_arch {
             }
         }
 
-        let mut rng = SHAKE256x4::new(&b"fpemu"[..]);
+        let mut rng = SHAKE256_PRNG::new(&b"fpemu"[..]);
         for ctr in 1..=65536 {
             let j = (rand_u64(&mut rng) as i64) >> (ctr & 63);
             assert!(j != -9223372036854775808);

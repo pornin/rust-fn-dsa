@@ -37,35 +37,6 @@ impl KeccakState {
         Self([0u64; 25])
     }
 
-    // Create a new KeccakState corresponding to a SHAKE256 instance;
-    // the provided seed and 1-byte id are injected into the state, and
-    // padding is applied. In order to get some SHAKE256 output, the
-    // caller will need to call process(), which applies the Keccak-f
-    // permutation. This function supports large seeds, by internally
-    // calling process() when necessary.
-    #[cfg(feature = "shake256x4")]
-    fn new_shake256_with_id(seed: &[u8], id: u8) -> Self {
-        let mut state = Self::new();
-        let mut j = 0;
-        for i in 0..seed.len() {
-            state.0[j >> 3] ^= (seed[i] as u64) << ((j & 7) << 3);
-            j += 1;
-            if j == 136 {
-                j = 0;
-                state.process();
-            }
-        }
-        state.0[j >> 3] ^= (id as u64) << ((j & 7) << 3);
-        j += 1;
-        if j == 136 {
-            j = 0;
-            state.process();
-        }
-        state.0[j >> 3] ^= 0x1F << ((j & 7) << 3);
-        state.0[16] ^= 0x80 << 56;
-        state
-    }
-
     fn process(&mut self) {
         let mut A: [u64; 25] = self.0;
 
@@ -772,162 +743,24 @@ impl PRNG for SHAKE256_PRNG {
         self.ptr += 8;
         x
     }
-}
 
-/// PRNG based on four parallel SHAKE256 instances.
-///
-/// Initialization is based on a provided seed of arbitrary length. The
-/// four internal SHAKE256 instances are initialized with the seed
-/// followed by a single byte (of value 0x00, 0x01, 0x02 or 0x03,
-/// depending on the inner instance). The four SHAKE256 outputs are
-/// interleaved with a 64-bit granularity (i.e. first 8 bytes are from
-/// inner instance 0, then next 8 bytes are from inner instance 1, etc).
-#[cfg(feature = "shake256x4")]
-#[derive(Copy, Clone, Debug)]
-pub struct SHAKE256x4 {
-    state: [KeccakState; 4],
-    buf: [u8; SHAKE256x4_BUF_LEN],
-    ptr: usize,
-    #[cfg(all(not(feature = "no_avx2"),
-        any(target_arch = "x86_64", target_arch = "x86")))]
-    use_avx2: bool,
-}
-
-// Internal buffer of SHAKE256x4 must have length exactly 4*136 = 544
-// bytes, since each SHAKE256 instance outputs 136 bytes for each
-// Keccak-f permutation invocation.
-#[cfg(feature = "shake256x4")]
-const SHAKE256x4_BUF_LEN: usize = 4 * 136;
-
-#[cfg(all(
-    feature = "shake256x4",
-    not(feature = "no_avx2"),
-    any(target_arch = "x86_64", target_arch = "x86")))]
-#[path = "shake256x4_avx2.rs"]
-mod shake256x4_avx2;
-
-#[cfg(feature = "shake256x4")]
-impl SHAKE256x4 {
-
-    /// Create a new instance over the provided seed.
-    ///
-    /// The PRNG output is deterministic for any given seed value.
-    pub fn new(seed: &[u8]) -> Self {
-        #[cfg(all(not(feature = "no_avx2"),
-            any(target_arch = "x86_64", target_arch = "x86")))]
-        if super::has_avx2() {
-            let mut sh = Self {
-                state: [
-                    KeccakState::new(),
-                    KeccakState::new(),
-                    KeccakState::new(),
-                    KeccakState::new(),
-                ],
-                buf: [0u8; SHAKE256x4_BUF_LEN],
-                ptr: SHAKE256x4_BUF_LEN,
-                use_avx2: true,
-            };
-            unsafe {
-                shake256x4_avx2::init_seed(&mut sh, seed);
+    fn next_bytes(&mut self, dst: &mut [u8]) {
+        let mut off = 0;
+        let len = dst.len();
+        while off < len {
+            let mut blen = self.buf.len() - self.ptr;
+            if blen == 0 {
+                self.refill();
+                blen = self.buf.len() - self.ptr;
             }
-            return sh;
-        }
-
-        SHAKE256x4 {
-            state: [
-                KeccakState::new_shake256_with_id(seed, 0),
-                KeccakState::new_shake256_with_id(seed, 1),
-                KeccakState::new_shake256_with_id(seed, 2),
-                KeccakState::new_shake256_with_id(seed, 3),
-            ],
-            buf: [0u8; SHAKE256x4_BUF_LEN],
-            ptr: SHAKE256x4_BUF_LEN,
-            #[cfg(all(not(feature = "no_avx2"),
-                any(target_arch = "x86_64", target_arch = "x86")))]
-            use_avx2: false,
-        }
-    }
-
-    // This function refills the buffer with 4*136 = 544 bytes.
-    fn refill(&mut self) {
-        self.ptr = 0;
-
-        #[cfg(all(not(feature = "no_avx2"),
-            any(target_arch = "x86_64", target_arch = "x86")))]
-        if self.use_avx2 {
-            unsafe {
-                shake256x4_avx2::refill(self);
+            if blen > (len - off) {
+                blen = len - off;
             }
-            return;
+            dst[off..(off + blen)].copy_from_slice(
+                &self.buf[self.ptr..(self.ptr + blen)]);
+            self.ptr += blen;
+            off += blen;
         }
-
-        // Update all four SHAKE256 states.
-        for i in 0..4 {
-            self.state[i].process();
-        }
-
-        // Each SHAKE256 instance produced 136 new bytes (held in
-        // the 17 first words of the state). The four streams are
-        // interleaved with word granularity.
-        for i in 0..(SHAKE256x4_BUF_LEN / 32) {
-            for j in 0..4 {
-                let v = 32 * i + 8 * j;
-                self.buf[v..v + 8].copy_from_slice(
-                    &self.state[j].0[i].to_le_bytes());
-            }
-        }
-    }
-
-    /// Get the next byte from the PRNG.
-    pub fn next_u8(&mut self) -> u8 {
-        if self.ptr >= SHAKE256x4_BUF_LEN {
-            self.refill();
-        }
-        let x = self.buf[self.ptr];
-        self.ptr += 1;
-        x
-    }
-
-    /// Get the next 16-bit value from the PRNG.
-    pub fn next_u16(&mut self) -> u16 {
-        if self.ptr >= (SHAKE256x4_BUF_LEN - 1) {
-            self.refill();
-        }
-        let x = u16::from_le_bytes(*<&[u8; 2]>::try_from(
-            &self.buf[self.ptr..self.ptr + 2]).unwrap());
-        self.ptr += 2;
-        x
-    }
-
-    /// Get the next 64-bit value from the PRNG.
-    pub fn next_u64(&mut self) -> u64 {
-        if self.ptr >= (SHAKE256x4_BUF_LEN - 7) {
-            self.refill();
-        }
-        let x = u64::from_le_bytes(*<&[u8; 8]>::try_from(
-            &self.buf[self.ptr..self.ptr + 8]).unwrap());
-        self.ptr += 8;
-        x
-    }
-}
-
-#[cfg(feature = "shake256x4")]
-impl PRNG for SHAKE256x4 {
-
-    fn new(seed: &[u8]) -> Self {
-        SHAKE256x4::new(seed)
-    }
-
-    fn next_u8(&mut self) -> u8 {
-        SHAKE256x4::next_u8(self)
-    }
-
-    fn next_u16(&mut self) -> u16 {
-        SHAKE256x4::next_u16(self)
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        SHAKE256x4::next_u64(self)
     }
 }
 
@@ -1003,40 +836,6 @@ mod tests {
         "8d8001e2c096f1b88e7c9224a086efd4797fbf74a8033a2d422a2b6b8f6747e4",
         "2e975f6a8a14f0704d51b13667d8195c219f71e6345696c49fa4b9d08e9225d3d39393425152c97e71dd24601c11abcfa0f12f53c680bd3ae757b8134a9c10d429615869217fdd5885c4db174985703a6d6de94a667eac3023443a8337ae1bc601b76d7d38ec3c34463105f0d3949d78e562a039e4469548b609395de5a4fd43c46ca9fd6ee29ada5efc07d84d553249450dab4a49c483ded250c9338f85cd937ae66bb436f3b4026e859fda1ca571432f3bfc09e7c03ca4d183b741111ca0483d0edabc03feb23b17ee48e844ba2408d9dcfd0139d2e8c7310125aee801c61ab7900d1efc47c078281766f361c5e6111346235e1dc38325666c",
     ];
-
-    // This function tests SHAKE256x4 against the SHAKE implementation.
-    #[cfg(feature = "shake256x4")]
-    #[test]
-    fn shake256x4() {
-        let mut seed_tab = [0u8; 300];
-        let mut sh = SHAKE256::new();
-        sh.flip();
-        sh.extract(&mut seed_tab);
-        for i in 0..seed_tab.len() + 1 {
-            let mut p = SHAKE256x4::new(&seed_tab[0..i]);
-            let mut v1 = [0u8; 1280];
-            for j in 0..(v1.len() >> 1) {
-                let w = p.next_u16();
-                v1[2 * j + 0] = w as u8;
-                v1[2 * j + 1] = (w >> 8) as u8;
-            }
-            let mut v2 = [0u8; 1280];
-            for n in 0..4 {
-                sh.reset();
-                sh.inject(&seed_tab[0..i]);
-                sh.inject(&[n as u8]);
-                let mut tmp = [0u8; 320];
-                sh.flip();
-                sh.extract(&mut tmp);
-                for j in 0..40 {
-                    for k in 0..8 {
-                        v2[32 * j + 8 * n + k] = tmp[8 * j + k];
-                    }
-                }
-            }
-            assert!(v1 == v2);
-        }
-    }
 
     // SHA3 test vectors from:
     //    https://csrc.nist.gov/Projects/cryptographic-algorithm-validation-program/Secure-Hashing

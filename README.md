@@ -16,6 +16,13 @@ cease to be accepted by ulterior versions. Only version 1.0 will provide
 such stability, and it will be published only after publication of the
 final FN-DSA standard.
 
+**2026-07-22:** The implementation has been adjusted to match a "best
+guess" at what the FN-DSA draft will be when published. If the guess is
+incorrect and the actual FN-DSA draft differs, then this implementation
+will be adjusted again, which may further break backward compatibility.
+See [the C implementation](https://github.com/pornin/c-fn-dsa) for
+details.
+
 ## Sizes
 
 FN-DSA (Falcon) nominally has two standard "degrees" `n`, equal to 512
@@ -35,16 +42,16 @@ are as follows (depending on degree):
 ```
     logn    n     sign-key  vrfy-key  signature  security
    ------------------------------------------------------------------
-      9    512      1281       897       666     level I (~128 bits)
-     10   1024      2305      1793      1280     level V (~256 bits)
+      9    512      1345       897       666     level I (~128 bits)
+     10   1024      2369      1793      1280     level V (~256 bits)
 
-      2      4        13         8        47     none
-      3      8        25        15        52     none
-      4     16        49        29        63     none
-      5     32        97        57        82     none
-      6     64       177       113       122     none
-      7    128       353       225       200     very weak
-      8    256       641       449       356     presumed weak
+      2      4        77         8        47     none
+      3      8        89        15        52     none
+      4     16       113        29        63     none
+      5     32       161        57        82     none
+      6     64       241       113       122     none
+      7    128       417       225       200     very weak
+      8    256       705       449       356     presumed weak
 ```
 
 Note that the sizes are fixed. Moreover, all keys and signatures use
@@ -93,13 +100,6 @@ modify the code generation:
     can be used if compiled code footprint is an issue. SSE2 opcodes will
     still be used.
 
-  - `shake256x4`: switch the internal PRNG from SHAKE256 to four SHAKE256
-    instances running in parallel, with interleaved output; this makes
-    signature generation about 20% faster on x86 with AVX2 support, but
-    slightly raises stack usage. On other platforms (including x86 without
-    AVX2 support) it does not noticeably change signing performance. The
-    impact on key pair generation speed is always small.
-
   - `div_emu`: on `riscv64`, do not use the hardware implementation for
     floating-point divisions. This feature was included because some
     RISC-V cores, in particular the SiFive U74, have constant-time
@@ -115,7 +115,7 @@ modify the code generation:
     using `small_context` shrinks the context size from about 114 kB to
     about 82 kB, but it also increases signature cost by about 25%.
 
-Of these options, only `no_avx2` has any impact on verifying.
+Of these options, only `no_avx2` has any impact on keygen or verifying.
 
 ## Performance
 
@@ -133,14 +133,14 @@ follows the correct strict IEEE-754 rounding rules; on other platforms
 used, which emulates the expected IEEE-754 primitives. Key pair
 generation and signature verification use only integer operations.
 
-On an Intel i5-8259U ("Coffee Lake", a Skylake variant), the following
-performance is achieved (in clock cycles):
+On an Intel i5-8259U ("Coffee Lake", a Skylake variant), with Rust 1.97.1,
+the following performance is achieved (in clock cycles):
 
 ```
-    degree    keygen      sign     +sign    verify  +verify
-   ---------------------------------------------------------
-      512    11800000   1020000    856000    75000    52000
-     1024    45000000   1980000   1700000   151000   105000
+    degree    keygen      sign     +sign    verify   +verify
+   ----------------------------------------------------------
+      512     8910000   1130000    933000    63300    46800
+     1024    34500000   2140000   1860000   124000    91400
 ```
 
 `+sign` means generating a new signature on a new message but with the
@@ -157,8 +157,8 @@ follows:
 ```
     degree    keygen      sign     +sign    verify  +verify
    ---------------------------------------------------------
-      512    21500000   1120000    795000   145000   104000
-     1024    80000000   2220000   1590000   298000   212000
+      512    16600000   1150000    855000   119000   103000
+     1024    62200000   2250000   1710000   237000   206000
 ```
 
 These figures are very close to what can be achieved on the Intel Coffee
@@ -175,8 +175,8 @@ than the two previous, the following is achieved:
 ```
     degree    keygen      sign     +sign    verify  +verify
    ---------------------------------------------------------
-      512    55000000   4530000   3370000   387000   274000
-     1024   198000000   9170000   7050000   801000   566000
+      512    39900000   4250000   3290000   296000   252000
+     1024   170000000   8510000   6850000   605000   508000
 ```
 
 To put things into perspective, FN-DSA/512 is substantially faster than
@@ -187,86 +187,6 @@ is about as fast as FN-DSA/512; for all other operations, FN-DSA/512 is
 faster, sometimes by a large amount, e.g. on the ARM Cortex-A76
 signature generation with this code is about 8 times faster than
 OpenSSL's RSA-2048).
-
-## Specific Variant
-
-In the original Falcon scheme, the signing process entails generation
-of a random 64-byte nonce, and that nonce is hashed together with the
-message to sign with SHAKE256; the output is then converted to a
-polynomial `hm` with rejection sampling:
-
-```
-    hm <- SHAKE256( nonce || message )
-```
-
-This mode is supported by the implementation (using the custom
-`HASH_ID_ORIGINAL_FALCON` hash identifier); this is an obsolescent
-feature and support of the original Falcon design is expected to be
-dropped at some point. For enhanced functionality (support of pre-hashed
-messages) and better security in edge cases, the implementation
-currently implements what is my best guess of how FN-DSA will be
-defined, using the existing ML-DSA ([FIPS
-204](https://csrc.nist.gov/pubs/fips/204/final)) as a template. The
-message is either "raw", or pre-hashed with a collision-resistant
-hash function. If the message is "raw" then the `hm` polynomial is
-obtained as:
-
-```
-    hm <- SHAKE256( nonce || hpk || 0x00 || len(ctx) || ctx || message )
-```
-
-where:
-
-  - `hpk` is the SHAKE256 hash (with a 64-byte output) of the encoded
-    public key
-  - `0x00` is a single byte
-  - `ctx` is an arbitrary domain separation context string of up to 255
-    bytes in length
-  - `len(ctx)` is the length of `ctx`, encoded over a single byte
-
-The message may also be pre-hashed with a hash function such as SHA3-256,
-in which case only the hash value is provided to the FN-DSA implementation,
-and `hm` is computed as follows:
-
-```
-    hm <- SHAKE256( nonce || hpk || 0x01 || len(ctx) || ctx || id || hv )
-```
-
-where:
-
-  - `id` is the DER-encoded ASN.1 OID that uniquely identifies the hash
-    function used for pre-hashing the message
-  - `hv` is the pre-hashed message
-
-Since SHAKE256 is a "good XOF", adding `hpk` and `ctx` to the input,
-with an unambiguous encoding scheme, cannot reduce security; therefore,
-the "raw message" variant as shown above is necessarily at least as
-secure as the original Falcon design. In the case of pre-hashing, this
-obviously adds the requirement that the pre-hash function must be
-collision resistant, but it is otherwise equally obviously safe. Note
-that ASN.1/DER encodings are self-terminated, thus there is no
-ambiguousness related to the concatenation of `id` and `hv`.
-
-Adding `hpk` to the input makes FN-DSA achieve [BUFF
-security](https://eprint.iacr.org/2024/710), a property which is not
-necessarily useful in any given situation, but can be obtained here at
-very low cost (no change in size of either public keys or signatures,
-and only some moderate extra hashing). The `hpk` value is set to 64
-bytes just like in ML-DSA.
-
-As an additional variation: the Falcon signature generation works in a
-loop, because it may happen, with low probability, that either the
-sampled vector is not short enough, or that the final signature cannot
-be encoded within the target signature size (which is fixed). In either
-case, with the original Falcon, the process restarts but reuses the same
-nonce (hence the same `hm` value). In the variant implemented here
-(outside of the "original Falcon" mode), a new nonce is generated when
-such a restart happens. Though the original Falcon method is not known
-to be unsafe in any way, this nonce regeneration has been [recently
-argued](https://eprint.iacr.org/2024/1769) to make it much easier to
-prove some security properties of the scheme. Since restarts are rare,
-this nonce regeneration does not imply any noticeable performance hit.
-In any case, regenerating the nonce cannot harm security.
 
 ## Usage
 

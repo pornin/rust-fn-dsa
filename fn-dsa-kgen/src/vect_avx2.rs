@@ -514,25 +514,6 @@ pub(crate) unsafe fn vect_to_fxr(logn: u32, d: &mut [FXR], f: &[i8]) {
     }
 }
 
-// Add vector b to vector a. This works in both real and FFT representations.
-#[target_feature(enable = "avx2")]
-pub(crate) unsafe fn vect_add(logn: u32, a: &mut [FXR], b: &[FXR]) {
-    if logn >= 2 {
-        let ap: *mut __m256i = transmute(a.as_mut_ptr());
-        let bp: *const __m256i = transmute(b.as_ptr());
-        for i in 0..(1usize << (logn - 2)) {
-            let ya = _mm256_loadu_si256(ap.wrapping_add(i));
-            let yb = _mm256_loadu_si256(bp.wrapping_add(i));
-            let yd = _mm256_add_epi64(ya, yb);
-            _mm256_storeu_si256(ap.wrapping_add(i), yd);
-        }
-    } else {
-        for i in 0..(1usize << logn) {
-            a[i] += b[i];
-        }
-    }
-}
-
 // Multiply vector a by constant c. This works in both real and FFT
 // representations.
 #[target_feature(enable = "avx2")]
@@ -548,24 +529,6 @@ pub(crate) unsafe fn vect_mul_realconst(logn: u32, a: &mut [FXR], c: FXR) {
     } else {
         for i in 0..(1usize << logn) {
             a[i] *= c;
-        }
-    }
-}
-
-// Multiply vector a by 2^e. Exponent e should be in the [0,30] range.
-#[target_feature(enable = "avx2")]
-pub(crate) unsafe fn vect_mul2e(logn: u32, a: &mut [FXR], e: u32) {
-    if logn >= 2 {
-        let ap: *mut __m256i = transmute(a.as_mut_ptr());
-        let ye = _mm256_set1_epi64x(e as i64);
-        for i in 0..(1usize << (logn - 2)) {
-            let ya = _mm256_loadu_si256(ap.wrapping_add(i));
-            let yd = _mm256_sllv_epi64(ya, ye);
-            _mm256_storeu_si256(ap.wrapping_add(i), yd);
-        }
-    } else {
-        for i in 0..(1usize << logn) {
-            a[i].set_mul2e(e);
         }
     }
 }
@@ -678,40 +641,6 @@ pub(crate) unsafe fn vect_div_selfadj_fft(logn: u32, a: &mut [FXR], b: &[FXR]) {
     }
 }
 
-// Compute d = a*adj(a) + b*adj(b). Polynomials are in FFT representation.
-// Since d is self-adjoint, it is half-size (only the low half is set, the
-// high half is implicitly zero).
-#[target_feature(enable = "avx2")]
-pub(crate) unsafe fn vect_norm_fft(logn: u32,
-    d: &mut [FXR], a: &[FXR], b: &[FXR])
-{
-    if logn >= 3 {
-        let dp: *mut __m256i = transmute(d.as_mut_ptr());
-        let ap: *const __m256i = transmute(a.as_ptr());
-        let bp: *const __m256i = transmute(b.as_ptr());
-        let hn = 1usize << (logn - 3);
-        for i in 0..hn {
-            let ya_re = _mm256_loadu_si256(ap.wrapping_add(i));
-            let ya_im = _mm256_loadu_si256(ap.wrapping_add(i + hn));
-            let yb_re = _mm256_loadu_si256(bp.wrapping_add(i));
-            let yb_im = _mm256_loadu_si256(bp.wrapping_add(i + hn));
-            let y0 = fxr_sqr_x4(ya_re);
-            let y1 = fxr_sqr_x4(ya_im);
-            let y2 = fxr_sqr_x4(yb_re);
-            let y3 = fxr_sqr_x4(yb_im);
-            let yd = _mm256_add_epi64(
-                _mm256_add_epi64(y0, y1),
-                _mm256_add_epi64(y2, y3));
-            _mm256_storeu_si256(dp.wrapping_add(i), yd);
-        }
-    } else {
-        let hn = 1usize << (logn - 1);
-        for i in 0..hn {
-            d[i] = a[i].sqr() + a[i + hn].sqr() + b[i].sqr() + b[i + hn].sqr();
-        }
-    }
-}
-
 // Compute d = (2^e)/(a*adj(a) + b*adj(b)). Polynomials are in FFT
 // representation. Since d is self-adjoint, it is half-size (only the
 // low half is set, the high half is implicitly zero).
@@ -748,6 +677,36 @@ pub(crate) unsafe fn vect_invnorm_fft(logn: u32, d: &mut [FXR],
             let z1 = a[i].sqr() + a[i + hn].sqr();
             let z2 = b[i].sqr() + b[i + hn].sqr();
             d[i] = r / (z1 + z2);
+        }
+    }
+}
+
+// Replace a with 2^e/a. Polynomial is in FFT representation.
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn vect_inv_mul2e_fft(logn: u32, a: &mut [FXR], e: u32)
+{
+    if logn >= 3 {
+        let ap: *mut __m256i = transmute(a.as_mut_ptr());
+        let hn = 1usize << (logn - 3);
+        let ye = _mm256_set1_epi64x(e as i64);
+        for i in 0..hn {
+            let yre = _mm256_loadu_si256(ap.wrapping_add(i));
+            let yim = _mm256_loadu_si256(ap.wrapping_add(i + hn));
+            let yim = _mm256_sub_epi64(_mm256_setzero_si256(), yim);
+            let yz = _mm256_add_epi64(fxr_sqr_x4(yre), fxr_sqr_x4(yim));
+            let yre = fxr_div_x4(_mm256_sllv_epi64(yre, ye), yz);
+            let yim = fxr_div_x4(_mm256_sllv_epi64(yim, ye), yz);
+            _mm256_storeu_si256(ap.wrapping_add(i), yre);
+            _mm256_storeu_si256(ap.wrapping_add(i + hn), yim);
+        }
+    } else {
+        let hn = 1usize << (logn - 1);
+        for i in 0..hn {
+            let re = a[i];
+            let im = -a[i + hn];
+            let z = a[i].sqr() + a[i + hn].sqr();
+            a[i] = re.mul2e(e) / z;
+            a[i + hn] = im.mul2e(e) / z;
         }
     }
 }

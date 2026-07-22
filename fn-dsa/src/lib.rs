@@ -21,8 +21,7 @@
 //! encodings, message pre-hashing, and domain separation. Key pairs
 //! generated with this crate MAY fail to be interoperable with the final
 //! FN-DSA standard. This implementation is expected to be adjusted to
-//! the FN-DSA standard when published (before the 1.0 version
-//! release).**
+//! the FN-DSA standard when published (before the 1.0 version release).**
 //!
 //! ## Implementation notes
 //!
@@ -108,7 +107,7 @@ pub use fn_dsa_comm::{
     FN_DSA_LOGN_512, FN_DSA_LOGN_1024,
     HashIdentifier,
     HASH_ID_RAW,
-    HASH_ID_ORIGINAL_FALCON,
+    HASH_ID_EXTMU,
     HASH_ID_SHA256,
     HASH_ID_SHA384,
     HASH_ID_SHA512,
@@ -120,6 +119,8 @@ pub use fn_dsa_comm::{
     HASH_ID_SHAKE256,
     DomainContext,
     DOMAIN_NONE,
+    hashed_vrfykey_from_signkey, hashed_vrfykey_from_vrfykey,
+    compute_mu, compute_mu_start,
     CryptoRng, RngCore, RngError,
 };
 pub use fn_dsa_comm::shake::{SHAKE, SHAKE128, SHAKE256, SHA3_224, SHA3_256, SHA3_384, SHA3_512};
@@ -131,16 +132,9 @@ pub use fn_dsa_vrfy::{VerifyingKey, VerifyingKeyStandard, VerifyingKeyWeak, Veri
 mod tests {
     use super::*;
 
-    // We use two fake RNGs for tests; they have been designed to allow
-    // reproducing vectors in the C implementation:
-    //
-    //  - FakeRng1: this is simply SHAKE256 over the provided seed
-    //
-    //  - FakeRng2: for the given seed, 96-byte blocks are obtained, each
-    //    as SHAKE256(seed || ctr), with ctr being a counter that starts at
-    //    0, and is encoded over 4 bytes (little-endian). The RNG output
-    //    consists of the concatenation of these 96-byte blocks.
-
+    // We use fake RNGs for tests.
+    // FakeRng1 is just SHAKE256 initialized with an explicit seed.
+    // FakeRng2 just responds with hardcoded bytes.
     struct FakeRng1(SHAKE256);
     impl FakeRng1 {
         fn new(seed: &[u8]) -> Self {
@@ -163,41 +157,20 @@ mod tests {
         }
     }
 
-    struct FakeRng2 {
-        sh: SHAKE256,
-        buf: [u8; 96],
-        ptr: usize,
-        ctr: u32,
-    }
-    impl FakeRng2 {
-        fn new(seed: &[u8]) -> Self {
-            let mut sh = SHAKE256::new();
-            sh.inject(seed);
-            Self { sh, buf: [0u8; 96], ptr: 96, ctr: 0 }
+    struct FakeRng2<'a> { rnd: &'a [u8], ptr: usize, }
+    impl<'a> FakeRng2<'a> {
+        fn new(seed: &'a [u8]) -> Self {
+            Self { rnd: seed, ptr: 0, }
         }
     }
-    impl CryptoRng for FakeRng2 {}
-    impl RngCore for FakeRng2 {
+    impl CryptoRng for FakeRng2<'_> {}
+    impl RngCore for FakeRng2<'_> {
         fn next_u32(&mut self) -> u32 { unimplemented!(); }
         fn next_u64(&mut self) -> u64 { unimplemented!(); }
         fn fill_bytes(&mut self, dest: &mut [u8]) {
-            let mut j = 0;
-            let mut ptr = self.ptr;
-            while j < dest.len() {
-                if ptr == self.buf.len() {
-                    let mut sh = self.sh.clone();
-                    sh.inject(&self.ctr.to_le_bytes());
-                    sh.flip();
-                    sh.extract(&mut self.buf);
-                    self.ctr += 1;
-                    ptr = 0;
-                }
-                let clen = core::cmp::min(dest.len() - j, self.buf.len() - ptr);
-                dest[j..j + clen].copy_from_slice(&self.buf[ptr..ptr + clen]);
-                ptr += clen;
-                j += clen;
-            }
-            self.ptr = ptr;
+            let dlen = dest.len();
+            dest.copy_from_slice(&self.rnd[self.ptr..self.ptr + dlen]);
+            self.ptr += dlen;
         }
         fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RngError> {
             self.fill_bytes(dest);
@@ -217,7 +190,7 @@ mod tests {
         let vk_e = &mut vk_buf[..vrfy_key_size(logn)];
         let vk2_e = &mut vk2_buf[..vrfy_key_size(logn)];
         let sig = &mut sig_buf[..signature_size(logn)];
-        for t in 0..2 {
+        for t in 0..((11 - logn) as u8) {
             // We use a reproducible source of random bytes.
             let mut rng = FakeRng1::new(&[logn as u8, t]);
 
@@ -231,7 +204,8 @@ mod tests {
             assert!(vk_e == vk2_e);
 
             // Sign a test message.
-            sk.sign(&mut rng, &DOMAIN_NONE, &HASH_ID_RAW, &b"test1"[..], sig);
+            sk.sign(&mut rng,
+                &DOMAIN_NONE, &HASH_ID_RAW, &b"test1"[..], sig).unwrap();
 
             // Verify the signature. Check that modifying the context,
             // message or signature results in a verification failure.
@@ -261,235 +235,135 @@ mod tests {
     }
 
     // Test vectors:
-    // KAT[j] contains 10 vectors for logn = j + 2.
-    // For test vector KAT[j][n]:
-    //    Let seed1 = 0x00 || logn || n
-    //    Let seed2 = 0x01 || logn || n
-    //    (logn over one byte, n over 4 bytes, little-endian)
-    //    seed1 is used with FakeRng1 in keygen.
-    //    seed2 is used with FakeRng2 for signing.
-    //    A key pair (sk, vk) is generated. A message is signed:
+    // KAT[logn - 2] contains 10 vectors for n = 2^logn
+    // For test vector KAT_n[j]:
+    //    Let seed = logn || j
+    //    (logn over one byte, j over 4 bytes, little-endian)
+    //    SHAKE256(seed) generates seed_kgen (32 bytes) and seed_sign (40 bytes)
+    //    A key pair (sk, vk) is generated with seed_kgen.
+    //    A message is signed with seed_sign:
     //        domain context: "domain" (6 bytes)
     //        message: "message" (7 bytes)
-    //        if n is odd, message is pre-hashed with SHA3-256; raw otherwise
-    //    KAT[j][n] is SHA3-256(sk || vk || sig)
-    #[cfg(feature = "shake256x4")]
-    const KAT: [[&str; 10]; 9] = [
-        [
-            "feeb4bde204cb40cbe06c7e5834abdfcec199219197e603883dbe47028bbfbf2",
-            "4f7d1867e9e02ee571a45b6d6d24b8f02b68b2e59441d1e341d06bbf36bf668e",
-            "8bd38088f833b66d1a5a4319e48c0efd2b1578fd7fc3bb7d20e167f4cd52e8de",
-            "24e37763e19942bb1acc6b5e5a4867170d07741fe055e8e3c2411f1b754bbd1b",
-            "9679a55739e76b66a475fe94053606bf07b930d47cc05377444f19f2c85ef2e6",
-            "3435ac75ffeb8c72df5e5d2c8619ef2a991de0fe9864014306a9af16630b41f3",
-            "8913b2791a76a746242160a800737459dc6457d1420317d7b21043ae286c5798",
-            "56413a0307b574b7bff2b6f9f9b59e346f6ab16c2c75fe1c64949a025dc40534",
-            "570e6fe189c45ab50e039eaa0ac3c5f2f50efbffa08e006368d3364e4d49f7fd",
-            "60b307e72b295b3fb13bd7c2f5926b521c34fbbd4d9ee3cdfe89eed9ffb2d2af",
-        ], [
-            "956766887db48fd1f9cac47a93a12c9e55de6e47006457eceee523d3566f3dec",
-            "9f41d30fad1bee288928b1f78a376a46dc06a0edc869bdb6cce0acc36583e92f",
-            "8389ba7095343bd222c9818da07ac7e66b73dfdeafb6cdc10377242874c27ece",
-            "7fd7ba114d952c9afe2c1dd4ee30e644b2e6caed13aed4e7e969260962a25c58",
-            "5a65e67783352ade4a5cfc7d0a48849fecbdbefffdcd8d25d425c3f013f9f019",
-            "f3044d077d30621ac7735fb3f95c35a58e15a3aa1c391467b6c33e05d8240c28",
-            "cf012db9b469ada96be790b8050b68d531fbdd2f4940d0ac07b8ffc02310f8e3",
-            "1e1c251797a4b27f4849ab34dfb9b21b3a84a52c4b0c11b93cf07305da26134f",
-            "6e051f873582f6d94c93b335f059588acb00722a40e09b310a0c00894fdf05af",
-            "d025acba6daf2b1de7d82d423b6eecb946e98cd7f7125f150e302ac8fccc3af2",
-        ], [
-            "7e2561ddd8664383b2e03bcb4da2409d4c43676ed021dee59766e72890a4509b",
-            "7f284169006a71440cc27cace9cfeab56440d357ee42b47609e1b76513281b21",
-            "46c05f015b609826c310a098a2105a0e94ad271313031b307a5ff6af09b14de2",
-            "ed689cbfd26b8d3f4785d2622df343ef6ef11bf7d883d41f570416a632213fe1",
-            "3b8c717aa4b2c5ea95b8df2af003e97d982e20230058ccaaa3d465a3239b05ca",
-            "71e64b14011712731f7e02dee789d8c76cbc0d5f16c983b044067b30d47971d1",
-            "3bc7443e28014cd78cb31eb7e5283aa9e23827d21b1317a8fe4fbb031cedcac5",
-            "4ffe1c59cfe27ecbf233710bdc535a4a332c68e741a0a9a1b684d773cfc031f3",
-            "49adb0cb6ed7af916adb4f213016d862a88ab284f9a61fc11e12a1828540b1b4",
-            "27d2d2558117e4861207851dcc5f51322fb5e21cad7ace06390f5132f4c0ec17",
-        ], [
-            "97517f9cfe9641fbb06b08afa09be14096b13573960f6790ba1119eb01a8f723",
-            "66c8669fe31f434582a465705dafea2a09c4acaf5c2c9d5975b4ec72d556c80b",
-            "7207b9f036d9b7a40f5d3647f03fb4ebc373719f240791cd65f9f35fc471ef35",
-            "bb9f9ebe61c5db1d72ebfaf2d699cc4c70e4c899f896b4f331fae004cd7a9b59",
-            "90484e94c5bb5c6c2f5c48bfeec4ce15b4935d09bc55b1fdaa6ad71e3e03e194",
-            "ea8822e989b8bf3484eaac010d77275d7d953cd0d16a51dbde9dc43ccf4bed0a",
-            "afb52381c81b8b5fa7b48bbd8262e450bc69161e6c31112678a3743b5efbf58b",
-            "96be92ccc265fa68564593baa4fe4f3cbac2f4a0c85c81f80ca28b2f3a3c099b",
-            "05af0cb90b923f778c7f88b0e6747861da0a0f73481fe2b1587b16417ed7101f",
-            "fc3201c8a5763e6b9919c54044aa7c302dc11344ab629917ef14680d3dce82fa",
-        ], [
-            "dc6efcd8382f2ec32a5d0048ccfecd7d0aa2804ed31f9ca7b3b7fe80a1f278d6",
-            "8b96fe42791a4ddd3f426ea35d278830d0d688a2259355e568e63a88afe8093a",
-            "6fd98e52e33c89a20dda23f4f25744350fd69f3fec640c06590866b004f3799d",
-            "b0696877b0de7a9b82b74038b4be03d8a4669de8aa39845c36bc969ec8cdd4a5",
-            "e0047e262bfd3df4874587d3966d12191835d27a84935d4f28ee6551c4d56db9",
-            "3b61bc4d990adf23afbef5e0366d4d3328f776e74173792de0ebb1ac9d87412b",
-            "358eeb3cfa720339970489378e1418cb618f927b47065e580f8c56b74f92f46b",
-            "4384664a9f6ef03ddb96b77e09349ce951480ac0e0666e9f4236b213c69cfb2f",
-            "8cd018e4d9add2fd5f12dc3015e9ff5ef6195154d4c09f4dfa8436681899db6d",
-            "37e523a85668c4ea1ea59eb44e44bb1872d0ce8ec9571e329a1b2a9a60eacd05",
-        ], [
-            "22195e02f65e0906245eaedd12bedd89a89afcb68c62d27ded954a72fdfa1547",
-            "dc2051d21719a1276c7a1f860e334c632ea0b1b15ff5203aac6fb93fe11ee123",
-            "adc6b4de01547c5d6b382534fbc715fe7c434cd5c213f7bfd2d1d5056e7618a6",
-            "191a5490b1a8fb166e3337ffd15b2b9d99dc31ebb07f69c8fa527e5e4878edf6",
-            "60592b75cfb9bc459b99ada2e6b357b8b2a0796316a97efdf7d42d49ac8a20ac",
-            "ff9660ef3e4f918ed588bc315e5f295421e0e8ff88d3c787d8c587396ab8e881",
-            "2dd9b7c1632f64ad88da054db0488324d00f4ef550bddbd5961b963400f824b9",
-            "c3d68100de903315d7a7ae47ce3d33ba9da7f9d6a27d563ccce997771a13974f",
-            "b793a6fec199c60455ea22cf3b9cf0987a3c1157b4729f522498fdfe1e8f6043",
-            "23f66127ac55cfab218a9a4b199fa42bc64056bb040ae653e90e63cc882eff60",
-        ], [
-            "0e19693ced586519efd7ff4cb45b8013d2f300b60eba2d291599d366bb03f1d9",
-            "30c926ee6237d407cff189c2baeb3171872aebc461b919484cf30d93250fcde0",
-            "3d4268db567841caa0e360e2d6c79c354b659f521509243381b494b4eec2b4af",
-            "0c504032ffbdd2f2b26cb8d0c478fbf645e2fe3bdacd1fe25a5d15fd3830edc0",
-            "3c9bcb09a3b6b54264068bf1df32051065f1099d4fa0b90ffb14e5391e7af564",
-            "2c2efd441d9733dc3c14b1e62444856d9ffe12e4ef5104dd30e891c2c16237f0",
-            "5b87a753c041dc60f938b0971e066d6feb6055f1a021db3036ca64741280a116",
-            "f38f57b7cda123e36a03ebb7c0bb196a86dda4abd66a038cd054f7a4bd61e50a",
-            "755a29fb4dcf7808399f501fde4c0e23d11b9face58c9f6681f1c636b2256989",
-            "af091e60104821510b28599068fa84fd814af62d978f6830e7fa2fc51fedcf9b",
-        ], [
-            "a32f07baf6b7ff6bc7c3c4f8c638871ff8c4803b0e54bedb9363f5672011077b",
-            "1794cfad199c20879d1ffe10ce263334095e51f0ed191ed74e4cba635e233d80",
-            "d16188abb5502eae81e6e03750123e156d8ed7dfa830a0c879560b383a5dc53a",
-            "14c03d690bf39bed73ac024a2b94adc1ff276d0c11e35d3455b9ea13c361b96c",
-            "c3bdbab8e434c5264c1d6fb523777d5bab1e23a1c292066e3cb731742230b042",
-            "d315c931fde38bdaeb83e6378d322f33ec9a36915ea5ed05e84ec3debddafa55",
-            "3587e5d75e2f0de5e2116c3a136d1a559e58ffd4a10328060ce9a430e47bd87c",
-            "b622711852cdc9893aec144ed635d2ae775778c6f4152e106b7b6b2842c8055d",
-            "32b3c2ed31f11795dde312b0574164dc4d00712f4736d1c5142a49cab4261ed4",
-            "e2bd2350de9bdab72d3a517251217d8fdbd7ea6e386ad2ff1da19c7c2111bcb2",
-        ], [
-            "16ef63f9dc51b66565bb05ac525f3668fa48186b973a95599e0c963cfd6a4297",
-            "f62ac74368b2f8b80b6e12f13e026c9ba493c59b9eb2225a2626dc773e257dba",
-            "3f4de163f9a44137c52b0d9d6042a236fb8a05f9bd6617e12fbbd32bb0f2120c",
-            "77d567ae787dae191cdcf406f5e6a88e16b6a3729b814ac49f7d182b6cd624d8",
-            "d19a28ba50359df8d119fa4557116d45dffec6f422ae9aa563186270a6a36ee0",
-            "cbda1bcc23e33ff63864cbb44db9e618c76214a91e8a4f57ea1170b468181728",
-            "ebf8388ba558660ffc67ac6d14709b7ffd096603ba23660c761b603767b469d7",
-            "233f0de0b9f70c2b7de870fc2f3d0b0d1fa37224a3264525d2d8537862c353d8",
-            "9fdf2626bcb2e5a8622dd1fcc78ce78db3a2aceeff030def85574259ae41e555",
-            "979346e3d31abf04f815ffd1d7bd44da03c636172b46ab260e365c4a4672445e",
-        ]
-    ];
+    //        if j is odd, message is pre-hashed with SHA3-256; raw otherwise
+    //    KAT[logn - 2][j] is SHA3-256(sk || vk || sig)
 
-    #[cfg(not(feature = "shake256x4"))]
     const KAT: [[&str; 10]; 9] = [
         [
-            "517e169d05b8cd4b6afa81847d5f1ed47309650a9ccff39c4445ae57914a2058",
-            "ce8f23924e463c769cedbd034eb0f11574c1cb8a453949c6c36b34e09e41d06c",
-            "65c2b2a6f2054faf7dbe97454d68b66768ca2ca5f65e7cbea5a91cdc1c6549a4",
-            "568e6ad817ba21b555808255db94a710ebbd5005284585365dc5308046e23d66",
-            "8ec696eaee01f9ec43bdb04d9dab7ff43d8bd80c7081134b9863f7c6ebbbe284",
-            "96e95da3c03426bbb3448084cbb54d83392acae745e3781f890dcddb030572cb",
-            "469be4112615d98308ef9df8cb8b0f3da1ca2558d79b7a867530de7d4000fb9b",
-            "80d7cc5c779ae2a590249169e10e935a1e8bf481d1c8babf3487acc0838b99d1",
-            "faac905c850eeb978e776f1e7fb1bf7ad40dd9618792f25fc3fae9ee47d8ce15",
-            "fc484c374ab40a4dbb5ea62b04a10f0c945105cddd48c4a90e729fc07680e88b",
+            "d4bb8ac8fa02ca916ace37586269218ded12afcfbacc290a142274661ef9e784",
+            "3565c014785b035c2442a93a06c5e9105b895b34ba92d7958a5683d0d9ce29f5",
+            "a7a38eaef6b8f43aa39913bac0d8c762c461d61cba2e81f06a1be0f6e2d537e0",
+            "53f44db3f24a3ecf59124fbc2bbaf8bc08160e648fb30b0eb8c5f402f8cac536",
+            "e63e7f053f6a072f5207b3996e8bdd12def03813d9b217d22a9cd96726f104a0",
+            "e53cc18f683951db780d1e68a519d955d9015ff4d94ce42ec8a8d980511aa373",
+            "ae6dfaab6db4ad836bc42cfe58344d3e3d0f9d4968f1d243ba38183ca1409730",
+            "64a376800ae2bf5090ec1e50b9bc1cb5e2ffdca84a4304d5757794a76324c108",
+            "71b39bb48de89f402d5c048cd2f38bdd27bb7720111f6ae88897f6af84f8fdcb",
+            "490fb34bfd84adaa504c23dfeb9a621c7b4daab147856c877fae3ad7ba2b3d1f",
         ], [
-            "bef4b8dc62d8e0b5eca9bc09366b1dcf7327dfbac10042406cc2217e9d0791f5",
-            "f75a3392c69345b6f5355d104305efae9a9d90fd5dfaa03120a12e02356b34fd",
-            "e3c8a660f6ab7102d9a975c94d6c0206e0835cc88ab36dd63556540c15b32ac3",
-            "1cd5bcadfc883540211d7803a2d6ff47474e4d5bc8a42b79ff97327f6e75b574",
-            "671b901f1535f58e198eab7fb9e84525f4315337abe30f902e6c0305501b0709",
-            "680d8b79f8d91ce1ae6a070baebd8f3f99472efe1c14efa35e1a653472ac98c2",
-            "3d9c77564d8ac733fd20bbff61d078c0ee094dc50ef2a0d8b53238263bd9f0d9",
-            "5b96561ca0cb41b1c09dc569ee48e596067df5a287a838f88b98e2375880d053",
-            "b306079cd1f2f4029cee72988ace631572ad7f2620e020cf5ad4b1ae598424e1",
-            "9a8cf1dc6b62c9f8b7790943ca9e48beef24aa8326b9002146e1858bc61103d2",
+            "b8ab12d83bd3e559bb1df1c256fa0a77722c3cf7326efbf6dcd0b92ceeed5e16",
+            "af5f98191865ddde1bd8f13a065e5b4595bbb721253d10970b240eaa040a0943",
+            "a5c08cbd9d776e330e63e91c8e2948b8a411a3f53e86b52a76e67b3ffcf48f55",
+            "46d348a1ed975891db62de10ccf48f968f19ff28fb23c4b43a94abec90ca2147",
+            "f11171b1598f5c387faba115823b1d78b24147e21d1e7acd0f63d8de784d46e8",
+            "e35f94986445b13da057236c2f51d45d76c2477c8957c34b52f7863cbdf2f45a",
+            "efebe6c9dc58d702a0a3e9773461ea6f95888fd2e569b1fbf4a6937e99d7e542",
+            "5747a79febfdc0402a1f3c4d11f437bcdd284c210d370e55fc5878a65b671189",
+            "f4d5a288dc21973dd0929a91cecc392dd385a702acf1e635100a3130cf437997",
+            "f93ec3e9e8edc3ad1ced06f2b83741b2afc77248049b617e0e14a5171669dea7",
         ], [
-            "e3f4742be370ea418feab49c3fee6a98ac52c1f1cb39138a90092449595b3f81",
-            "d6659d9895e4b59c1001bf8354319889ef89f9c42570147dc86d615db94ade09",
-            "f4b95d6d27a64fbd303a7091625bd8daf61c3301376d512203c2fb53fb726317",
-            "8c94c3df7eb93a31ce32b756ed0279c8c36e8cbe9a76901823d61f64244be8a9",
-            "c2ff7bff549c1f050c81dc3ca6ccd0537f0345b304f9271457405ac5b0ff1bb6",
-            "d03a17462c30a7bd7d594cd0ac209d4f3704a96934e0c12e31010e8bcd58f472",
-            "e694f16019b9ed9afa360db94a29bf5036ef88fb4ff5fe8315bcb0cfd9b65bad",
-            "89cd099d215ed66c93586484c48994e3d772511768561e0465c74852ff921ac0",
-            "366844a98fa179f96019f6f930829c960990ac438da24a945f40791b4ab3771c",
-            "736d879d25597e39878548a2efc2b37d7d48744cf621803a97fa84d1337d8478",
+            "137514e7bb1f150426d66f3dd64b26d26272f225d4926e185b7a2dbe9d421460",
+            "0dd3bdf334a1379381d9123d9c3c05b5280759c65c99ed81a46df2b0af1320af",
+            "c5ffeba6ea3b630701a32a9a6e3e736dcd32ce8394edf855bb81a433daa3f188",
+            "3e911daa7655073d9987221f7eeb45c3336bd8aad2909de431c9a5cbd2dc33e6",
+            "4fff7e334de3dc4c442aa6953713cbc2a8bd4f1c67eb3ee02a06789a88d2e790",
+            "04c12dcd4fcc512097bec078464b1370aba0fa7cd0ab11352ec4e76c64f9cada",
+            "b5f62f1d82c76055fc7cd846a54d7f39bb2c0f74ee55e1c2d98b82ee10d076fa",
+            "44953161d2d0b6227d3f55730d1034a138c58e8800541fc30346e3c7627eb696",
+            "d8d23052ac3f14133b5fa886da8aede2dfe5ce8aca270e65b23688889ea1b821",
+            "456772f7f182f3b241a17f4b2482efac038955d76dabceb49562fa6e62ad5d95",
         ], [
-            "f13154701ddb47458310e09b3bd20350fc8ec13b42dfb2f3414fe49dc21054e5",
-            "dccc7800c714f9b1e28f6f414ad0760619bf19d319eee3e7a2f7cbae16ec44f4",
-            "0a7c0f023c83e81fce3aa8737aa999131f9b1c78db813c8471af2bf41af34959",
-            "65afc54bf77ab9a82c306d15e66a993e4af999a9edb08d822cc70e05d4d73866",
-            "b05a93ffe94fb3ea4da3430929ea577310c748744e0b9595bd8c4243ac8ffe7a",
-            "7ef713863e94b608f95cf4bb63214fb2fd23812d98d88cd06213e2d9d9dce4c0",
-            "39a2b9a5411ae63a80a75725abaab5191d394229d2dd44c2476bc2fee88a29b6",
-            "354bd2ccf6b8c814bfa644e4bc9e5610d42d1516e3fe342d9878ba7d03033a5c",
-            "9e93e4e05072a624170bccb231caacf69faaaaced8b636eed522ac031eb1e25d",
-            "104a62c58b72b70f1fe0eac8ca4b8775ddcbd2ec62f07f91e6b54dd578c1a65c",
+            "49151dcac636c59c55930e91a11292426718147fcaf896228bfb690c662d78e2",
+            "34dcc0e9699691dff61a72881f04484b333954e3c8de319ce890c47456559f48",
+            "73184939665019b4fdfb2de0af502ad3ef4b1f13472d7aa1c739064b074debbf",
+            "264f5aa8556e0ae4b11027565e44ac47a52788cd80ed030e1b0e9f758eafd84a",
+            "3f5bac7c84a1351c060bb4ee49b957e2a936c9314a75d2f9c06051dea294f407",
+            "8b5d3a6f387e1187a500ab55648eb07a7e495a0ae97e7d031a667eca36c11e87",
+            "bd6a11ed412ce3c1f7b41763c20cc1f9335b2a5a58be4ea3ecc8943fd698d2a9",
+            "3f75f78c35123a4ea85afaa4c4035ee7c56b0ace01cc1c647c84df007dc38aee",
+            "8e5e0653c3f087c0c1a608edf03962230efb963d0e00254ce29950905ebb2e50",
+            "8938c6f1d88d63f4726363aeb82d91ecaeb058c1c9f8697166d97b2d33fcd78d",
         ], [
-            "7a65360991f32d38d8267e9b8fa29f21f59923efa27a39214abb3412d316cf13",
-            "13c0a7f42988e36cc0440f056341791fab717a0b1f9a62954489388a77c1447f",
-            "5aef7941bda5f7ec4b12141eaf09dcafe741e4aac536f232e167b7c154196999",
-            "60a910388695d6aa8d1194e70fa7a502e21e98f50017b8282cab0c6c18e82c62",
-            "304ffc725fc4b6515f3ca5b45dc7b86155cab3de57657efe9c647643d93e0d69",
-            "e2ce9a2d7acdb4d0cf906e1d072d4448537fa42ac2f3e0d0531a6e6336196eee",
-            "081848b14fc7dd83df56c2f2379bdb20266241c428ce09cee65c3b4dd1965989",
-            "4c9066103f99d6aaac3dbe5be9ef0dd06f090a8479e458aa3e83e6b26c6d19f3",
-            "ac6fb3acbae450b3d75927532a462fadd64a1c0f025b1c416f27b2f41f945567",
-            "65190b3eb43adbaa09d9bf2ccf971b70fb382c56e8676dc4a579f8d666f953c2",
+            "bbfc086cc6efe456483d80ed130fa3cf468ca927f2f98e0275976fb978034c53",
+            "963e9ea43d0733cf4e735d6b85baa32d5a5071442053adf3cf711ee76f8fc0a2",
+            "f03c8f8bd2fbbf434c7adb880befdf87aad135bcf933ff3fef1f72ee7518c120",
+            "e8d5ccc73b73c2bd78748fcdccdb8bae5fcbd9872b343a41c45b1af04a56487c",
+            "674bf0c4e6c0ab53019d0d27564dc25c8c515e1e1306c5512cc4bbf922aa5f6a",
+            "22f274014a72d463ed078b729819ac2f4dc5163271731526ea1fca836afb418a",
+            "5ae920ac2ca2ced3f0da1292e1a645f5c6a4a78258c207a83b39668ae1556b25",
+            "ba169240a38b209cd482137269f0c33cca98e3bd181c576e1523bd5b3306207e",
+            "f5ad4fc07a56f20232bd3d51f6c386f93f152fde088e3d545c24da012b893e42",
+            "3dcdc145e4c8466e80f19f06bd59ff5d4dc0ad299b6b0d1ee7b78688c41367c7",
         ], [
-            "4850dc7976386e64a98cdbbb8a886e6d8cdb52c496e9d626f4c8fdd915658494",
-            "9d17107e409910f16a43ac73068c2d656db2ca684ba86c0ad7a4cb14ca1bf931",
-            "64adc2f8d3594064a32cb1f00ab8ddcfbad33fde6d2398f829c1923cb38d52c5",
-            "edad1b81ff0a71bd76ed7984450030ac9cc861e62d432f85ed0ed83b2d463c8a",
-            "9d9ae5f83c1a768eb8cd3b3a09aa5d8ba9d659c43fbf00892f0c32b0ead076c2",
-            "f27c0674120eace270ae47852a38596ed1867727f6748cd7128682574d4b3a05",
-            "d2ee57706149d6838df63dda7b122e32445f0ed2b495fd336c46ce3384a3c0ee",
-            "3774f7f8c948792aa4c480d3b9300b5cb91cbb619327a18ee66a89511cad2d92",
-            "b915349483e3a85db14fa612327b7eaa1ab201f47d0795a05d06bd5b2d92def2",
-            "daed7bab12476abb916a22f092ba52a93da5540506188fb982f538ad98d3db11",
+            "2e590e99833785ee67b7fa004c3b4525f1f77a89d938f9ed38f2b718c331bda8",
+            "134537a6a183db2eb232fe2b8f6accf474d34759dfe86bb2ffec669a77dd7a14",
+            "471e4f121374d2c25c714865a3960bee910dcb50e3e8645c1f54f4c3e22fb186",
+            "48153c04b97c4a3507602db294d8abbebeed34fa87ce7eabcadfc441d69288ad",
+            "4f9c6703595b5f77ff6048e270cf4c4ae73a82e65f227edba91f7e84022eb5c0",
+            "c8ffe0bce23744ed41933402dc5b9e6416086b129924b171af0d47b2aeb5a5b9",
+            "bd7c4187b36bd31ec677e4db4feff6d60511aee7d9716b78e3159aa322168a70",
+            "a5b70aa436c3cdff9d1c69a0a9825c505be0775ead0b45608b368df9b4c429af",
+            "fc6c1c552ecc836b11f7beb2cb5613254d13de4c0930e234002a3b6418717077",
+            "76c61e7f16492c22832057af120a39437deb748c199da5c2404bb4a363c76e1f",
         ], [
-            "1c3196947f64e22696a151f75ce97f67626ffc089abc4681adc2caf3c4828b1a",
-            "2749938e3936a4ffb83583da86f3506a2a88f73248e80f14c50c8c92cd9d4ede",
-            "8884f415f33b2d6a91a12b8d4fa0f9641178b62f2a623ff2f9cdff74cf88cf87",
-            "8129eb52137edc7c56accf0b9d273b29085f77548693596075db48106c550c0a",
-            "2f1b7292868b1e10cceca079f60a065431f1381ce5046d9f6ae7191822110c40",
-            "b040ff3ec202020a879c69fc6f51c350d256fb02691aeaa77b1abfd9df6af42b",
-            "0f3c4a77457d920a0c87cf5dbfef8899a67aabda08ed5d8f2c5c5e9eb99fff41",
-            "1c51ce7bb6fa8b37a3c5ee99a09138bf9fd8310071d8adb91cd692d34e212daf",
-            "c3de8a295ef2ed1dfdc4c6a21f6c989c55435890d40e2706424660cb798befdb",
-            "230f62ab8fc0d086140584fc8977597f2c591da1f9627aef502c9e9eee9f4abc",
+            "7c186bbfd1376de1d14e5c9c44fd41183b6cf7d6988e904d14bb977c31519302",
+            "5fd57dd9530835813e59a3cce2879554be6df4067717426a4dd7efec4c8c731e",
+            "62c592885e4c385766b797e47198a08aa29878d602deeecb143cfb9e3065de8c",
+            "2d1a8b654a6100b6e7e238d709f4a95088a2c4b315545ff4ddcb38905f7dbf88",
+            "2798f70186b541ea96c3c2adeee96c3266dcc324038bed22c3156931335beca0",
+            "06aa91f4ff9a4bd75e7fb87b9a4f766bd3391b34e813ab46bfaa3b108292bdaf",
+            "29f0421ae8739fb73c832cb17baef2aea39ac12216028daf9334c08e7f6a23fd",
+            "486efe575fc0bafeac5b048da3b12280de402a66d304d2118ee2039fe206519a",
+            "954ad7d6cc89cb7066358ea82f14ab944d62212fbb63f53bdc0ac2b8ff57cbc3",
+            "c4141cebcb947e3dd702be708ce41eb20d2127719f404d476bc0945a6c5a79dd",
         ], [
-            "53748d0bda7a655b160d1237687f606fc6d85a768af7e52accb320cdc02fea56",
-            "566ff306b9e7a8509252fcbd315faa1c7d9a99e90a6e5a1e211dca0492fd2422",
-            "3927502da6d66d09c71baad0fb307e767287bca9defd3e5658093758dd6f4eb6",
-            "7d00e218c02ca8e2b0b475c67f06b544d74b24a0c79e775066f6d35b85bba168",
-            "5c7e80b3b95bbb04272cf6cb5482f98c5f48303119be7c1864fda7d183cf8dd2",
-            "8f8238dc09555fb6a06505af7d08ea909829bab3443c651791e91444d4f9ea29",
-            "27dc1593aea3529c25112b536ba38bf7ff26796f7199aff8597db61c013316c4",
-            "92770a08ede1e89721661b8812879ab2c1cae3ffe66056fa23e2ac4cc984998b",
-            "31e9907ba30080033d48535b1ecbc3e25e6b6b450fb1b310935e8b278654700e",
-            "779fb106eb89f09e1d09a7c3c3295d8b63fa93ca3e59de9a9adcc1eb3f392c0c",
+            "71009cd3bc68f5061608ab541e9ae27ba0263c42fad97c112825075176d539d0",
+            "70d8e2492da097f5407459eb9e3d58697855984e305032973a49709d208ddf1d",
+            "91807eec4fc11be204e0bb48d6cc5968dd4dd4e1e886370ddb0c95458d9b68f0",
+            "ded7d5c6392f0e16926a8e535b3bdb8b0fb4dc6dfd108ce8229c8ce6a378e965",
+            "7c6a265c4b6732dccbb2fcc872be4546709285f8ed13902d7adfef2fb006d513",
+            "c4afc6d00b2560fe567a1fab088d8b5e35774d4154a638fc5e4a10cc587aa798",
+            "e3a0d6f8aba1c5658e053234fa0526f0d6c05f33fece73965871376a1f9039fc",
+            "56d822207747b7c8bd47914482d63609e303bfa380b795b9f0f74cc0728ed040",
+            "4021a79b26e2b5ad8603b1ec203a0de7177bbb2c4f7e046be5438842dcef30ad",
+            "2ecca13d10dc658e0915bc42a8687d2aa7605c8670a2ca5c67e480487eaa0281",
         ], [
-            "c04a645eb9e60d117d29fe4a0d5314bedf1392cbad20bb15f9cc88ac25cd78e2",
-            "1f0e8af75f9abfed60ddafda6286c6fb27395188d3191763eedb05c00c908b39",
-            "669de6300e9fa19fbb9675769525d1f68d166297f6a67753c4dda74927c83286",
-            "d3990a8b5790cf298949bfae84f0fdee9898c95e56d5c54a8a315b81f521ac41",
-            "579d09da76792fcd7047cd3a271b3bddca1f8f0e753b1064466af4c297ca82aa",
-            "b0154f77732cf43763902e15e6683525841438343e4423f038990d923ee5e9a8",
-            "ece2780b43ae0744b5269730688d41871e5280c2ec6ed66535d9b0ece4a3aca5",
-            "51ca0dc5ccae2abb38e39eb2fa8bbc1bbfa46e4dca62bf6bd9666fe1eeb22803",
-            "8ae1591a9827357670f983a22cca71e754ede9ccae51f9a2f4bff89354903d0f",
-            "cde3f08ca0f7dcf93398bcbed80575c114dc1ddc046cb989385149e6a5deba13",
-        ]
+            "51bec3b8ca2565a94b2f1ad7bdc5f3844170495f235b8ea87fdae7e6d3b9dcb6",
+            "abed632dec978f230f17e1c9059e36a7f0edfbaac2969ee75100421ea3346446",
+            "83868908f2f89ee85a4e869b3d040de1f040e0dfa2e8cdabff00f0a2a2e8c120",
+            "66f11c38b7f787bd66cd00ec62f3f2af622b81274a4dbe9462025b8d757710e1",
+            "65602b1692abe97e845e41589d21927732f71c36ef1c888d155a15708b7b60e4",
+            "95539caec65ac9a9ce23175168af914b905165b8f72c4d700f61b0b746683b11",
+            "3a9632ee72a09704519eadea4b3688289c644f17105d29997d3555d21a428c7b",
+            "b32a4019b5e5f802d4b61c751b99c58ffdee5adbf8cb97dc59c480756aa0a4f7",
+            "439a026581a9472bf11b9f62389a066291b9a4ca789877ee2a44c9c6b5ca9852",
+            "37b7f34cd910edc8b53b5302af4e2ff60192a396fe6c44fe8140a0ce0be04888",
+        ],
     ];
 
     fn inner_kat<KG: KeyPairGenerator, SK: SigningKey, VK: VerifyingKey>(
-        logn: u32, num: u32) -> [u8; 32]
+        logn: u32, j: u32) -> [u8; 32]
     {
-        let seed1 = [0x00u8, logn as u8,
-            num as u8, (num >> 8) as u8, (num >> 16) as u8, (num >> 24) as u8];
-        let mut rng1 = FakeRng1::new(&seed1);
-        let seed2 = [0x01u8, logn as u8,
-            num as u8, (num >> 8) as u8, (num >> 16) as u8, (num >> 24) as u8];
-        let mut rng2 = FakeRng2::new(&seed2);
+        let mut seed_kgen = [0u8; 32];
+        let mut seed_sign = [0u8; 40];
+        let seed = [logn as u8,
+            j as u8, (j >> 8) as u8, (j >> 16) as u8, (j >> 24) as u8];
+        let mut sh = SHAKE256::new();
+        sh.inject(&seed);
+        sh.flip();
+        sh.extract(&mut seed_kgen);
+        sh.extract(&mut seed_sign);
+        let mut rng_kgen = FakeRng2::new(&seed_kgen);
+        let mut rng_sign = FakeRng2::new(&seed_sign);
 
         let mut sk_buf = [0u8; sign_key_size(10)];
         let mut vk_buf = [0u8; vrfy_key_size(10)];
@@ -498,18 +372,18 @@ mod tests {
         let vk = &mut vk_buf[..vrfy_key_size(logn)];
         let sig = &mut sig_buf[..signature_size(logn)];
 
-        KG::default().keygen(logn, &mut rng1, sk, vk);
+        KG::default().keygen(logn, &mut rng_kgen, sk, vk);
         let mut s = SK::decode(sk).unwrap();
         let v = VK::decode(vk).unwrap();
         let dom = DomainContext(b"domain");
-        if (num & 1) == 0 {
-            s.sign(&mut rng2, &dom, &HASH_ID_RAW, b"message", sig);
+        if (j & 1) == 0 {
+            s.sign(&mut rng_sign, &dom, &HASH_ID_RAW, b"message", sig);
             assert!(v.verify(sig, &dom, &HASH_ID_RAW, b"message"));
         } else {
             let mut sh = SHA3_256::new();
             sh.update(&b"message"[..]);
             let hv = sh.digest();
-            s.sign(&mut rng2, &dom, &HASH_ID_SHA3_256, &hv, sig);
+            s.sign(&mut rng_sign, &dom, &HASH_ID_SHA3_256, &hv, sig);
             assert!(v.verify(sig, &dom, &HASH_ID_SHA3_256, &hv));
         }
         let mut sh = SHA3_256::new();

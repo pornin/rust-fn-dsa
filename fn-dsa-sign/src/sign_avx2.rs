@@ -15,7 +15,7 @@ mod sampler_avx2;
 #[target_feature(enable = "avx2")]
 pub(crate) unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
     f: &mut [i8], g: &mut [i8], F: &mut [i8], G: &mut [i8],
-    vrfy_key: &mut [u8], hashed_vrfy_key: &mut [u8],
+    vrfy_key: &mut [u8], hashed_vrfy_key: &mut [u8], hashed_sign_key: &mut [u8],
     tmp_u16: &mut [u16], src: &[u8]) -> Option<u32>
 {
     if src.len() < 1 {
@@ -39,6 +39,7 @@ pub(crate) unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
     assert!(G.len() >= n);
     assert!(vrfy_key.len() >= vrfy_key_size(logn));
     assert!(hashed_vrfy_key.len() == 64);
+    assert!(hashed_sign_key.len() == 40);
     let f = &mut f[..n];
     let g = &mut g[..n];
     let F = &mut F[..n];
@@ -54,10 +55,17 @@ pub(crate) unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
     };
     let j = 1 + codec::trim_i8_decode(&src[1..], f, nbits_fg)?;
     let j = j + codec::trim_i8_decode(&src[j..], g, nbits_fg)?;
+    // We also hash the (f,g) part of the private key.
+    let mut sh = SHAKE256::new();
+    sh.inject(&src[1..j]);
+    sh.flip();
+    sh.extract(hashed_sign_key);
+    // Decode F.
     let j = j + codec::trim_i8_decode(&src[j..], F, 8)?;
     // We already checked the length of src; any mismatch at this point
     // is an implementation bug.
-    assert!(j == src.len());
+    assert!((j + 64) == src.len());
+    hashed_vrfy_key.copy_from_slice(&src[j..]);
 
     // Compute G from f, g and F. This might fail if the decoded f turns
     // out to be non-invertible modulo X^n+1 and q, or if the recomputed G
@@ -85,16 +93,27 @@ pub(crate) unsafe fn decode_avx2_inner(logn_min: u32, logn_max: u32,
     mq_avx2::mqpoly_int_to_NTT(logn, w1);
     mq_avx2::mqpoly_mul_ntt(logn, w1, w0);
 
-    // Convert back h to external representation and encode it.
-    mq_avx2::mqpoly_NTT_to_int(logn, w0);
+    // Since we recomputed h, we can here re-encode the verifying key.
     mq_avx2::mqpoly_int_to_ext(logn, w0);
     vk[0] = 0x00 + (logn as u8);
-    let j = 1 + codec::modq_encode(&w0[..n], &mut vk[1..]);
-    assert!(j == vk.len());
-    let mut sh = shake::SHAKE256::new();
-    sh.inject(vk);
-    sh.flip();
-    sh.extract(hashed_vrfy_key);
+    let k = 1 + codec::modq_encode(&w0[..n], &mut vk[1..]);
+    assert!(k == vk.len());
+
+    // Here we could rehash the verifying key, to validate the hash which
+    // is included in the encoded signing key. However, the FN-DSA standard
+    // does not mandate this check (the signing key is assumed to be
+    // consistent).
+    // let mut sh = SHAKE256::new();
+    // sh.inject(vk);
+    // sh.flip();
+    // sh.extract(hashed_vrfy_key);
+    // let mut cc = 0;
+    // for k in 0..hashed_vrfy_key.len() {
+    //     cc |= hashed_vrfy_key[k] ^ src[j + k];
+    // }
+    // if cc != 0 {
+    //     return None;
+    // }
 
     // Convert back G to external representation and check that all
     // elements are small.
@@ -136,53 +155,42 @@ pub(crate) unsafe fn compute_basis_avx2_inner(logn: u32,
 // This is a specialized version of sign_inner() (defined in the parent
 // module); it leverages AVX2 intrinsics to speed up operations.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn sign_avx2_inner<T: CryptoRng + RngCore, P: PRNG>(
-    logn: u32, rng: &mut T,
-    f: &[i8], g: &[i8], F: &[i8], G: &[i8], hashed_vrfy_key: &[u8],
-    ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], sig: &mut [u8],
+pub(crate) unsafe fn sign_avx2_inner<P: PRNG>(
+    logn: u32, seed: &[u8],
+    f: &[i8], g: &[i8], F: &[i8], G: &[i8],
+    mu: &[u8], sig: &mut [u8],
     #[cfg(not(feature = "small_context"))]
     basis: &[flr::FLR],
     tmp_i16: &mut [i16], tmp_u16: &mut [u16], tmp_flr: &mut [flr::FLR])
+    -> bool
 {
     let n = 1usize << logn;
+    assert!(seed.len() == 40);
     assert!(f.len() == n);
     assert!(g.len() == n);
     assert!(F.len() == n);
     assert!(G.len() == n);
+    assert!(mu.len() == 64);
     assert!(sig.len() == signature_size(logn));
 
-    // Special behaviour for the original Falcon algorithm (for test
-    // reproducibility). TODO: remove when switching to final test vectors.
-    let orig_falcon = id.0.len() == 1 && id.0[0] == 0xFF;
+    // The signing process fails with probability about 1/2450 at n=512,
+    // 1/820 at n=1024. Probability of failing 27 consecutive times is
+    // less than 2^(-256); if we run out of iterations then we assume
+    // that the private key is incorrect.
+    for counter in 0..27u8 {
+        // Initialize a PRNG with the seed and the counter.
+        let mut seed2 = [0u8; 41];
+        seed2[..40].copy_from_slice(&seed);
+        seed2[40] = counter;
+        let mut samp = sampler_avx2::Sampler::<P>::new(logn, &seed2);
 
-    // Hash the message with a 40-byte random nonce, to produce the
-    // hashed message.
-    let mut nonce = [0u8; 40];
-    let mut first = true;
+        // Get a 40-byte nonce.
+        let mut nonce = [0u8; 40];
+        samp.next_bytes(&mut nonce);
 
-    // Usually the signature generation works at the first attempt, but
-    // occasionally we need to try again because the obtained signature
-    // is not a short enough vector, or cannot be encoded in the target
-    // signature size.
-    loop {
+        // Hash the nonce and message representative into a polynomial.
         let hm = &mut tmp_u16[0..n];
-        // We must generate a random 40-byte nonce, and hash the
-        // message to a polynomial hm[].
-        // In the original Falcon, this was done once; in FN-DSA, this
-        // is done at each loop restart.
-        // (TODO: align with final spec)
-        if first || !orig_falcon {
-            rng.fill_bytes(&mut nonce);
-            hash_to_point(&nonce, hashed_vrfy_key, ctx, id, hv, hm);
-            first = false;
-        }
-
-        // We initialize the PRNG with a 56-byte seed, to match the
-        // practice from the C code (it makes it simpler to reproduce
-        // test vectors). Any seed of at least 32 bytes would be fine.
-        let mut seed = [0u8; 56];
-        rng.fill_bytes(&mut seed);
-        let mut samp = sampler_avx2::Sampler::<P>::new(logn, &seed);
+        hash_to_point(&nonce, mu, hm);
 
         // Lattice basis is B = [[g, -f], [G, -F]]. We need it in FFT
         // format, then we compute the Gram matrix G = B*adj(B).
@@ -366,6 +374,9 @@ pub(crate) unsafe fn sign_avx2_inner<T: CryptoRng + RngCore, P: PRNG>(
             let z = (z as i16) as i32;
             sqn = sqn.wrapping_add((z * z) as u32);
             ng |= sqn;
+            // We also need to enforce the maximum L-infinity norm on s1.
+            ng |= (codec::B_INF - z) as u32;
+            ng |= (codec::B_INF + z) as u32;
         }
 
         // With standard degrees (512 and 1024), it is very improbable that
@@ -379,6 +390,8 @@ pub(crate) unsafe fn sign_avx2_inner<T: CryptoRng + RngCore, P: PRNG>(
             sqn = sqn.wrapping_add((z * z) as u32);
             ng |= sqn;
             s2[i] = sz;
+            // We do not need to enforce the L-infinity norm on s2 since
+            // the encoding function will do it.
         }
 
         // If the squared norm exceeded 2^31-1 at some point, then the
@@ -392,11 +405,13 @@ pub(crate) unsafe fn sign_avx2_inner<T: CryptoRng + RngCore, P: PRNG>(
 
         // We have a candidate signature; we must encode it. This may
         // fail, since encoding is variable-size and might not fit in the
-        // target size.
+        // target size. Note: the comp_encode() function also enforces the
+        // maximum L-infinity norm.
         if codec::comp_encode(s2, &mut sig[41..]) {
             sig[0] = 0x30 + (logn as u8);
             sig[1..41].copy_from_slice(&nonce);
-            return;
+            return true;
         }
     }
+    false
 }

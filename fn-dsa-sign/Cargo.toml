@@ -1,6 +1,6 @@
 [package]
 name = "fn-dsa-sign"
-version = "0.3.0"
+version = "0.4.0"
 authors.workspace = true
 categories.workspace = true
 description.workspace = true
@@ -12,7 +12,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-fn-dsa-comm = { version = "0.3", path = "../fn-dsa-comm" }
+fn-dsa-comm = { version = "0.4", path = "../fn-dsa-comm" }
 zeroize.workspace = true
 
 [dev-dependencies]
@@ -24,4 +24,3 @@ small_context = []
 no_avx2 = []
 div_emu = []
 sqrt_emu = []
-shake256x4 = []

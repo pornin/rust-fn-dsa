@@ -13,6 +13,8 @@ pub mod mq;
 /// SHAKE implementation.
 pub mod shake;
 
+use shake::SHAKE256;
+
 /// Specialized versions of `mq` which use AVX2 opcodes (on x86 CPUs).
 #[cfg(all(not(feature = "no_avx2"),
     any(target_arch = "x86_64", target_arch = "x86")))]
@@ -37,7 +39,7 @@ pub const fn sign_key_size(logn: u32) -> usize {
         8..=9 => 6,
         _ => 5,
     };
-    1 + (nbits_fg << (logn - 2)) + n
+    65 + (nbits_fg << (logn - 2)) + n
 }
 
 /// Get the size (in bytes) of a verifying key for the provided degree
@@ -64,6 +66,31 @@ pub const fn signature_size(logn: u32) -> usize {
         - 2 * (2 >> (10 - logn)) - 8 * (1 >> (10 - logn))
 }
 
+/// Get the hash of the public (verifying) key from the private (signing) key.
+///
+/// This is a 64-byte value obtained with SHAKE256. It is used for computing
+/// message representatives (`mu`).
+pub fn hashed_vrfykey_from_signkey(sk: &[u8]) -> [u8; 64] {
+    assert!(sk.len() >= 65);
+    let mut r = [0u8; 64];
+    r.copy_from_slice(&sk[sk.len() - 64..]);
+    r
+}
+
+/// Get the hash of the pubblic (verifying) key from the key itself.
+///
+/// This function computes the hash of the provided key, with SHAKE256 and
+/// an output size of 64 bytes. This hash value is used for computing
+/// message representatives (`mu`).
+pub fn hashed_vrfykey_from_vrfykey(vk: &[u8]) -> [u8; 64] {
+    let mut r = [0u8; 64];
+    let mut sh = SHAKE256::new();
+    sh.inject(vk);
+    sh.flip();
+    sh.extract(&mut r);
+    r
+}
+
 /// The message for which a signature is to be generated or verified is
 /// pre-hashed by the caller and provided as a hash value along with
 /// an identifier of the used hash function. The identifier is normally
@@ -78,20 +105,13 @@ pub struct HashIdentifier<'a>(pub &'a [u8]);
 /// pre-hashing.
 pub const HASH_ID_RAW: HashIdentifier = HashIdentifier(&[0x00]);
 
-/// Hash function identifier: original Falcon design.
+/// Hash function identifier: external mu.
 ///
-/// This identifier modifies processing of the input so that it follows
-/// the Falcon scheme as it was submitted for round 3 of the post-quantum
-/// cryptography standardization process. When this identifier is used:
-///
-///  - The message is raw (not pre-hashed).
-///  - The domain separation context is not used.
-///  - The public key hash is not included in the signed data.
-///
-/// Supporting the original Falcon design is an obsolescent feature
-/// that will be removed at the latest when the final FN-DSA standard
-/// is published.
-pub const HASH_ID_ORIGINAL_FALCON: HashIdentifier = HashIdentifier(&[0xFF]);
+/// With this identifier, the message representative `mu` (64 bytes) is
+/// expected as message input; the provided context string is ignored.
+/// The computation of `mu` can be performed externally; see functions
+/// `compute_mu()` and `compute_mu_start()`.
+pub const HASH_ID_EXTMU: HashIdentifier = HashIdentifier(&[0xFE]);
 
 /// Hash function identifier: SHA-256
 pub const HASH_ID_SHA256: HashIdentifier = HashIdentifier(
@@ -137,30 +157,25 @@ pub struct DomainContext<'a>(pub &'a [u8]);
 /// Empty domain separation context.
 pub const DOMAIN_NONE: DomainContext = DomainContext(b"");
 
-/// Hash a message into a polynomial modulo q = 12289.
+/// Compute a message representative `mu`.
 ///
 /// Parameters are:
 ///
-///  - `nonce`:            40-byte random nonce
 ///  - `hashed_vrfy_key`:  SHAKE256 hash of public (verifying) key (64 bytes)
 ///  - `ctx`:              domain separation context
 ///  - `id`:               identifier for pre-hash function
 ///  - `hv`:               message (pre-hashed)
-///  - `c`:                output polynomial
 ///
 /// If `id` is `HASH_ID_RAW`, then no-prehashing is applied and the message
 /// itself should be provided as `hv`. Otherwise, the caller is responsible
-/// for applying the pre-hashing, and `hv` shall be the hashed message.
-pub fn hash_to_point(nonce: &[u8], hashed_vrfy_key: &[u8],
-    ctx: &DomainContext, id: &HashIdentifier, hv: &[u8], c: &mut [u16])
+/// for applying the pre-hashing, and `hv` shall be the hashed message. The
+/// hashed verifying key uses SHAKE256 with a 64-byte output; see
+/// `hashed_vrfykey_from_signkey()` and `hashed_vrfykey_from_vrfykey()`
+/// for functions that can yield that value from the signing and verifying
+/// keys, respectively.
+pub fn compute_mu(hashed_vrfy_key: &[u8],
+    ctx: &DomainContext, id: &HashIdentifier, hv: &[u8]) -> [u8; 64]
 {
-    // TODO: remove support for original Falcon when the final FN-DSA
-    // is defined and has test vectors. Since the message is used "as is",
-    // this encoding can mimic all others, and thus bypasses any attempt at
-    // domain separation. Moreover, ignoring the domain separation context
-    // is a potential source of security issues, since the caller might
-    // expect a strong binding to the context value.
-
     // Input order:
     //   With pre-hashing:
     //     nonce || hashed_vrfy_key || 0x01 || len(ctx) || ctx || id || hv
@@ -168,31 +183,78 @@ pub fn hash_to_point(nonce: &[u8], hashed_vrfy_key: &[u8],
     //     nonce || hashed_vrfy_key || 0x00 || len(ctx) || ctx || message
     // 'len(ctx)' is the length of the context over one byte (0 to 255).
 
-    assert!(nonce.len() == 40);
     assert!(hashed_vrfy_key.len() == 64);
     assert!(ctx.0.len() <= 255);
-    let orig_falcon = id.0.len() == 1 && id.0[0] == 0xFF;
+    assert!(!(id.0.len() == 1 && id.0[0] == 0xFE));
     let raw_message = id.0.len() == 1 && id.0[0] == 0x00;
-    let mut sh = shake::SHAKE256::new();
-    sh.inject(nonce);
-    if orig_falcon {
-        sh.inject(hv);
-    } else {
-        sh.inject(hashed_vrfy_key);
-        sh.inject(&[if raw_message { 0u8 } else { 1u8 }]);
-        sh.inject(&[ctx.0.len() as u8]);
-        sh.inject(ctx.0);
-        if !raw_message {
-            sh.inject(id.0);
-        }
-        sh.inject(hv);
+    let mut sh = SHAKE256::new();
+    sh.inject(hashed_vrfy_key);
+    sh.inject(&[if raw_message { 0u8 } else { 1u8 }]);
+    sh.inject(&[ctx.0.len() as u8]);
+    sh.inject(ctx.0);
+    if !raw_message {
+        sh.inject(id.0);
     }
+    sh.inject(hv);
+    sh.flip();
+    let mut r = [0u8; 64];
+    sh.extract(&mut r);
+    r
+}
+
+/// Start a computation of a message representative `mu`.
+///
+/// This function is meant for processing long messages in a streamed
+/// fashion (i.e. by successive chunks). One way to support streaming is
+/// to use pre-hashing (HashFN-DSA); if use of raw messages (not pre-hashed)
+/// is mandated for some compatibility reason, then this function can be
+/// used. Parameters are:
+///
+///  - `hashed_vrfy_key`:  SHAKE256 hash of public (verifying) key (64 bytes)
+///  - `ctx`:              domain separation context
+///
+/// Returned value is a newly initialized SHAKE256 context, with the hashed
+/// public key and context string already injected. The caller should then
+/// inject the message itself into the SHAKE256 instance, and then obtain
+/// from it a 64-byte output, which is the `mu` value. The message
+/// representative `mu` can be used as input message to the signing and
+/// verifying functions, using `HASH_ID_EXTMU` as hash function identifier.
+/// The hashed verifying key uses SHAKE256 with a 64-byte output; see
+/// `hashed_vrfykey_from_signkey()` and `hashed_vrfykey_from_vrfykey()`
+/// for functions that can yield that value from the signing and verifying
+/// keys, respectively.
+pub fn compute_mu_start(hashed_vrfy_key: &[u8], ctx: &DomainContext)
+    -> SHAKE256
+{
+    assert!(hashed_vrfy_key.len() == 64);
+    assert!(ctx.0.len() <= 255);
+    let mut sh = SHAKE256::new();
+    sh.inject(hashed_vrfy_key);
+    sh.inject(&[0u8]);
+    sh.inject(&[ctx.0.len() as u8]);
+    sh.inject(ctx.0);
+    sh
+}
+
+/// Hash a message into a polynomial modulo q = 12289.
+///
+/// Parameters are:
+///
+///  - `nonce`:            40-byte random nonce
+///  - `mu`:               message representative (64 bytes)
+pub fn hash_to_point(nonce: &[u8], mu: &[u8], c: &mut [u16])
+{
+    assert!(nonce.len() == 40);
+    assert!(mu.len() == 64);
+    let mut sh = SHAKE256::new();
+    sh.inject(nonce);
+    sh.inject(mu);
     sh.flip();
     let mut i = 0;
     while i < c.len() {
         let mut v = [0u8; 2];
         sh.extract(&mut v);
-        let mut w = ((v[0] as u16) << 8) | (v[1] as u16);
+        let mut w = (v[0] as u16) | ((v[1] as u16) << 8);
         if w < 61445 {
             while w >= 12289 {
                 w -= 12289;
@@ -224,6 +286,8 @@ pub trait PRNG: Copy + Clone {
     fn next_u16(&mut self) -> u16;
     /// Get the 64-bit value from the PRNG.
     fn next_u64(&mut self) -> u64;
+    /// Get some bytes from the PRNG.
+    fn next_bytes(&mut self, dst: &mut [u8]);
 }
 
 #[cfg(all(not(feature = "no_avx2"),

@@ -111,6 +111,38 @@ pub(crate) unsafe fn mp_mmul_x8(
     _mm256_add_epi32(yg, _mm256_and_si256(yp, _mm256_srai_epi32(yg, 31)))
 }
 
+#[target_feature(enable = "avx2")]
+pub(crate) unsafe fn mp_div_x8(
+    ynum: __m256i, yden: __m256i, yp: __m256i) -> __m256i
+{
+    let mut ya = yden;
+    let mut yb = yp;
+    let mut yu = ynum;
+    let mut yv = _mm256_setzero_si256();
+    let y1 = _mm256_set1_epi32(1);
+    for _ in 0..62 {
+        let ya_odd = _mm256_sub_epi32(
+            _mm256_setzero_si256(), _mm256_and_si256(ya, y1));
+        let yswap = _mm256_and_si256(ya_odd,
+            _mm256_srai_epi32(_mm256_sub_epi32(ya, yb), 31));
+        let yt1 = _mm256_and_si256(yswap, _mm256_xor_si256(ya, yb));
+        ya = _mm256_xor_si256(ya, yt1);
+        yb = _mm256_xor_si256(yb, yt1);
+        let yt2 = _mm256_and_si256(yswap, _mm256_xor_si256(yu, yv));
+        yu = _mm256_xor_si256(yu, yt2);
+        yv = _mm256_xor_si256(yv, yt2);
+        ya = _mm256_sub_epi32(ya, _mm256_and_si256(ya_odd, yb));
+        yu = mp_sub_x8(yu, _mm256_and_si256(ya_odd, yv), yp);
+        ya = _mm256_srli_epi32(ya, 1);
+        yu = mp_half_x8(yu, yp);
+    }
+
+    // GCD is in yb; it is 1 if and only if yden was invertible.
+    // Otherwise, the GCD is greater than 1.
+    _mm256_and_si256(yv, _mm256_srai_epi32(
+        _mm256_sub_epi32(yb, _mm256_set1_epi32(2)), 31))
+}
+
 // ------------------------------------------------------------------------
 
 // Compute the roots for NTT and inverse NTT.
@@ -1085,15 +1117,15 @@ pub(crate) unsafe fn poly_sub_scaled_ntt(logn: u32, F: &mut [u32], Flen: usize,
     }
 }
 
-// Subtract (k*2^scale_k_*(f,g) from (F,G). This is a specialized function
+// Subtract (k*2^scale_k_*f from F. This is a specialized function
 // for NTRU solving at depth 1, because we really want to use the NTT (degree
-// is large) but we do not have enough room in our buffers to keep (f,g)
+// is large) but we do not have enough room in our buffers to keep f
 // in RNS+NTT modulo enough primes. Instead, we recompute them dynamically
 // here.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
-    F: &mut [u32], G: &mut [u32], FGlen: usize,
-    k: &mut [u32], sc: u32, f: &[i8], g: &[i8], tmp: &mut [u32])
+pub(crate) unsafe fn poly_sub_kf_scaled_depth1(logn_top: u32,
+    F: &mut [u32], FGlen: usize,
+    k: &mut [u32], sc: u32, f: &[i8], tmp: &mut [u32])
 {
     let logn = logn_top - 1;
     let n = 1usize << logn;
@@ -1101,18 +1133,15 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
     let (gm, tmp) = tmp.split_at_mut(n);
     let (t1, t2) = tmp.split_at_mut(n);
 
-    // Convert F and G to RNS. Normally, FGlen is equal to 2; the code
+    // Convert F to RNS. Normally, FGlen is equal to 2; the code
     // below also covers the case FGlen = 1, which could be used in some
     // algorithms leveraging the same kind of NTRU lattice.
     if FGlen == 1 {
         let p = PRIMES[0].p;
         for i in 0..n {
             let xf = F[i];
-            let xg = G[i];
             let xf = xf | ((xf & 0x40000000) << 1);
-            let xg = xg | ((xg & 0x40000000) << 1);
             F[i] = mp_set(xf as i32, p);
-            G[i] = mp_set(xg as i32, p);
         }
     } else {
         assert!(FGlen == 2);
@@ -1133,17 +1162,6 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             let r1 = mp_add(yl1, mp_mmul(yh1, z1, p1, p1_0i), p1);
             F[i] = r0;
             F[i + n] = r1;
-
-            let xl = G[i];
-            let xh = G[i + n] | ((G[i + n] & 0x40000000) << 1);
-            let yl0 = mp_set_u(xl, p0);
-            let yh0 = mp_set(xh as i32, p0);
-            let r0 = mp_add(yl0, mp_mmul(yh0, z0, p0, p0_0i), p0);
-            let yl1 = mp_set_u(xl, p1);
-            let yh1 = mp_set(xh as i32, p1);
-            let r1 = mp_add(yl1, mp_mmul(yh1, z1, p1, p1_0i), p1);
-            G[i] = r0;
-            G[i + n] = r1;
         }
     }
 
@@ -1170,11 +1188,9 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
         }
         mp_NTT(logn, k, gm, p, p0i);
 
-        // Convert F and G to NTT.
+        // Convert F to NTT.
         let Fu = &mut F[(i << logn)..];
-        let Gu = &mut G[(i << logn)..];
         mp_NTT(logn, Fu, gm, p, p0i);
-        mp_NTT(logn, Gu, gm, p, p0i);
 
         // Given the top-level f, we obtain ft = N(f) with:
         //    f = f_e(X^2) + X*f_o(X^2)
@@ -1212,38 +1228,9 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
             Fu[(j << 1) + 1] = mp_sub(Fu[(j << 1) + 1], xkf1, p);
         }
 
-        // Same treatment for G and gt.
-        for j in 0..n {
-            t1[j] = mp_set(g[(j << 1) + 0] as i32, p);
-            t2[j] = mp_set(g[(j << 1) + 1] as i32, p);
-        }
-        mp_NTT(logn, t1, gm, p, p0i);
-        mp_NTT(logn, t2, gm, p, p0i);
-        for j in 0..hn {
-            let xe0 = t1[(j << 1) + 0];
-            let xe1 = t1[(j << 1) + 1];
-            let xo0 = t2[(j << 1) + 0];
-            let xo1 = t2[(j << 1) + 1];
-            let xv0 = gm[j + hn];
-            let xv1 = p - xv0;      // values in gm[] are non-zero
-            let xe0 = mp_mmul(xe0, xe0, p, p0i);
-            let xe1 = mp_mmul(xe1, xe1, p, p0i);
-            let xo0 = mp_mmul(xo0, xo0, p, p0i);
-            let xo1 = mp_mmul(xo1, xo1, p, p0i);
-            let xg0 = mp_sub(xe0, mp_mmul(xo0, xv0, p, p0i), p);
-            let xg1 = mp_sub(xe1, mp_mmul(xo1, xv1, p, p0i), p);
-            let xkg0 = mp_mmul(
-                mp_mmul(xg0, k[(j << 1) + 0], p, p0i), R3, p, p0i);
-            let xkg1 = mp_mmul(
-                mp_mmul(xg1, k[(j << 1) + 1], p, p0i), R3, p, p0i);
-            Gu[(j << 1) + 0] = mp_sub(Gu[(j << 1) + 0], xkg0, p);
-            Gu[(j << 1) + 1] = mp_sub(Gu[(j << 1) + 1], xkg1, p);
-        }
-
-        // Convert back F and G to RNS.
+        // Convert F back to RNS.
         mp_mkigm(logn, PRIMES[i].ig, p, p0i, t1);
         mp_iNTT(logn, Fu, t1, p, p0i);
-        mp_iNTT(logn, Gu, t1, p, p0i);
 
         // We replaced k (plain 32-bit) with (2^sc)*k (NTT); we must
         // put it back to its initial value for the next iteration.
@@ -1259,12 +1246,11 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
         }
     }
 
-    // F and G are in RNS (non-NTT), but we want plain integers.
+    // F is in RNS (non-NTT), but we want plain integers.
     if FGlen == 1 {
         let p = PRIMES[0].p;
         for i in 0..n {
             F[i] = (mp_norm(F[i], p) as u32) & 0x7FFFFFFF;
-            G[i] = (mp_norm(G[i], p) as u32) & 0x7FFFFFFF;
         }
     } else {
         let p0 = PRIMES[0].p;
@@ -1283,17 +1269,6 @@ pub(crate) unsafe fn poly_sub_kfg_scaled_depth1(logn_top: u32,
                 .wrapping_neg());
             F[i] = (z as u32) & 0x7FFFFFFF;
             F[i + n] = ((z >> 31) as u32) & 0x7FFFFFFF;
-        }
-        for i in 0..n {
-            let x0 = G[i];
-            let x1 = G[i + n];
-            let x0m1 = x0.wrapping_sub(p1 & !tbmask(x0.wrapping_sub(p1)));
-            let y = mp_mmul(mp_sub(x1, x0m1, p1), s, p1, p1_0i);
-            let z = (x0 as u64) + (p0 as u64) * (y as u64);
-            let z = z.wrapping_sub(pp & (hpp.wrapping_sub(z) >> 63)
-                .wrapping_neg());
-            G[i] = (z as u32) & 0x7FFFFFFF;
-            G[i + n] = ((z >> 31) as u32) & 0x7FFFFFFF;
         }
     }
 }

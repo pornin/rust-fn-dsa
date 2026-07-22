@@ -30,7 +30,7 @@ fn bench_sign(logn: u32) -> (f64, u8) {
         tt[i] = end.wrapping_sub(begin);
     }
     tt.sort();
-    ((tt[tt.len() >> 1] as f64) / 100.0, msg[0])
+    ((tt[tt.len() >> 1] as f64) / 1000.0, msg[0])
 }
 
 fn bench_sign_full(logn: u32) -> (f64, u8) {
@@ -49,7 +49,7 @@ fn bench_sign_full(logn: u32) -> (f64, u8) {
     let mut tt = [0; 10];
     for i in 0..tt.len() {
         let begin = core_cycles();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let mut sk = SigningKeyStandard::decode(sk_e).unwrap();
             sk.sign(&mut rng, &DOMAIN_NONE, &HASH_ID_RAW, &msg, sig);
             msg[0] = sig[sig.len() >> 1];
@@ -58,7 +58,7 @@ fn bench_sign_full(logn: u32) -> (f64, u8) {
         tt[i] = end.wrapping_sub(begin);
     }
     tt.sort();
-    ((tt[tt.len() >> 1] as f64) / 100.0, msg[0])
+    ((tt[tt.len() >> 1] as f64) / 1000.0, msg[0])
 }
 
 fn main() {
