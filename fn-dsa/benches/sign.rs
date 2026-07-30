@@ -22,7 +22,7 @@ fn bench_sign(logn: u32) -> (f64, u8) {
     let mut tt = [0; 10];
     for i in 0..tt.len() {
         let begin = core_cycles();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             sk.sign(&mut rng, &DOMAIN_NONE, &HASH_ID_RAW, &msg, sig);
             msg[0] = sig[sig.len() >> 1];
         }
