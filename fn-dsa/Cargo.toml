@@ -22,7 +22,12 @@ hex.workspace = true
 
 [features]
 default = []
-no_avx2 = []
+no_avx2 = [
+    "fn-dsa-comm/no_avx2",
+    "fn-dsa-kgen/no_avx2",
+    "fn-dsa-sign/no_avx2",
+    "fn-dsa-vrfy/no_avx2",
+]
 
 [[bench]]
 name = "keygen"
